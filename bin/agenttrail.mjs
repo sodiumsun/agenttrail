@@ -537,7 +537,7 @@ const server = http.createServer((req, res) => {
   } else if (u.pathname === '/session-sync-vault') {
     const sid = u.searchParams.get('id')
     const distilledFile = path.join(os.homedir(), '.sessions', 'distilled', 'claude', `${sid}.md`)
-    const vaultDir = '/Users/esaruoho/work/cc/vault/sources/conversations'
+    const vaultDir = path.join(os.homedir(), 'work', 'cc', 'vault', 'sources', 'conversations')
     const targetFile = path.join(vaultDir, `${sid}.md`)
     let success = false
     try {
