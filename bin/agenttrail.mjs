@@ -342,6 +342,65 @@ function loadPreviousSessions() {
   return list.sort((a, b) => b.mtime - a.mtime)
 }
 
+function getSessionTranscript(sessionId) {
+  const projDir = path.join(os.homedir(), '.claude', 'projects', encodeCwd(repo))
+  const fullPath = path.join(projDir, `${sessionId}.jsonl`)
+  const transcript = []
+  try {
+    if (fs.existsSync(fullPath)) {
+      const content = fs.readFileSync(fullPath, 'utf8')
+      const lines = content.split('\n')
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const d = JSON.parse(line)
+          const t = d.type
+          if (t === 'user') {
+            let text = ''
+            const contentVal = d.message?.content
+            if (typeof contentVal === 'string') {
+              text = contentVal
+            } else if (Array.isArray(contentVal)) {
+              text = contentVal.map(x => x.text || '').join(' ')
+            }
+            transcript.push({
+              role: 'user',
+              text: text.trim(),
+              timestamp: d.timestamp ? new Date(d.timestamp).getTime() : null
+            })
+          } else if (t === 'assistant') {
+            let text = ''
+            const contentVal = d.message?.content
+            if (typeof contentVal === 'string') {
+              text = contentVal
+            } else if (Array.isArray(contentVal)) {
+              text = contentVal.filter(x => x.type === 'text').map(x => x.text || '').join('\n')
+            }
+            
+            const tools = []
+            if (Array.isArray(contentVal)) {
+              contentVal.filter(x => x.type === 'tool_use').forEach(x => {
+                tools.push({
+                  name: x.name,
+                  input: typeof x.input === 'object' ? JSON.stringify(x.input) : String(x.input || '')
+                })
+              })
+            }
+            
+            transcript.push({
+              role: 'assistant',
+              text: text.trim(),
+              tools,
+              timestamp: d.timestamp ? new Date(d.timestamp).getTime() : null
+            })
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+  return transcript
+}
+
 function model() {
   if (treeDirty) { tree = buildTree(repo); treeDirty = false }
   return {
@@ -454,6 +513,9 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ project: session.project, port }))
   } else if (u.pathname === '/model') {
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(model()))
+  } else if (u.pathname === '/session-transcript') {
+    const sid = u.searchParams.get('id')
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(getSessionTranscript(sid)))
   } else if (u.pathname === '/events') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
     res.write(`data: ${JSON.stringify(model())}\n\n`)

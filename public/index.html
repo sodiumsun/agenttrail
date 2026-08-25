@@ -68,6 +68,7 @@ let M=null,lastGraphKey='',graphZoom=1,graphPan={x:0,y:0},graphSize={width:0,hei
 const openGraphDetails=new Set(),openGraphTasks=new Set(),closedGraphTasks=new Set()
 const openFolders=new Set(),closedFolders=new Set();let lastReveal=new Set()
 const openRuns=new Set()
+const loadedTranscripts=new Map()
 const $=id=>document.getElementById(id)
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
 const ago=ms=>{const s=Math.max(0,Math.round((Date.now()-ms)/1000));return s<60?`${s}s`:s<3600?`${Math.round(s/60)} min`:`${Math.round(s/3600)} h`}
@@ -234,13 +235,47 @@ function renderRuns(){
       const icon=agentIcon('claude')
       const sizeStr = r.size < 1024 ? `${r.size}B` : `${Math.round(r.size/1024)}K`
       const open = openRuns.has(r.id)
+      const tx = loadedTranscripts.get(r.id)
+      let transcriptHtml = ''
+      if (open) {
+        if (tx) {
+          transcriptHtml = `<div class="run-transcript" style="margin-top:10px; max-height:280px; overflow-y:auto; border-top:1px solid var(--hover); padding-top:8px; display:flex; flex-direction:column; gap:8px">` +
+            tx.map(turn => {
+              const isUser = turn.role === 'user'
+              const color = isUser ? 'var(--accent)' : '#d97757'
+              const name = isUser ? 'User' : 'Claude'
+              const bg = isUser ? 'rgba(233,162,59,0.03)' : 'rgba(217,119,87,0.02)'
+              const border = isUser ? '1px solid rgba(233,162,59,0.1)' : '1px solid rgba(217,119,87,0.1)'
+              
+              let toolsUsed = ''
+              if (turn.tools && turn.tools.length) {
+                toolsUsed = `<div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:4px">` +
+                  turn.tools.map(tool => `<div style="font-family:var(--mono); font-size:10px; color:var(--accent); background:rgba(233,162,59,0.08); padding:2px 6px; border-radius:4px">${esc(tool.name)}: <span style="color:var(--dim)">${esc(tool.input)}</span></div>`).join('') +
+                  `</div>`
+              }
+              
+              return `<div style="background:${bg}; border:${border}; border-radius:8px; padding:8px 10px; display:flex; flex-direction:column; gap:4px">
+                <div style="font-size:11px; font-weight:600; color:${color}; display:flex; justify-content:space-between">
+                  <span>${esc(name)}</span>
+                  ${turn.timestamp ? `<span style="font-family:var(--mono); font-weight:400; color:var(--faint); font-size:9.5px">${new Date(turn.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>` : ''}
+                </div>
+                <div style="font-size:11.5px; line-height:15px; color:var(--soft); white-space:pre-wrap; word-break:break-word">${esc(turn.text || '')}</div>
+                ${toolsUsed}
+              </div>`
+            }).join('') +
+            `</div>`
+        } else {
+          transcriptHtml = `<div style="margin-top:10px; font-size:11px; color:var(--faint); font-style:italic">Loading transcript...</div>`
+        }
+      }
       return`<div class="run-card ended ${open?'open':''}" data-run="${esc(r.id)}">
         <div class="run-head"><span class="run-agent"><svg viewBox="0 0 24 24"><path fill="${agentColor('claude')}" d="${icon||''}"/></svg></span><span class="run-name">claude</span><span class="run-elapsed"><span class="t-ago" data-at="${r.mtime}"></span></span></div>
         <div class="run-task" style="text-wrap:pretty; overflow:visible; white-space:normal; font-size:12px; color:var(--soft); line-height:16px">${esc(r.snippet)}</div>
         <div class="run-tool" style="margin-top:4px"><span class="tn" style="color:var(--faint)">${r.turns} turns · ${sizeStr}</span></div>
         <div class="run-detail" style="${open?'display:block':''}; margin-top:8px; border-top:1px solid var(--hover); padding-top:8px">
           <div style="font-family:var(--mono); font-size:11px; margin-bottom:4px; color:var(--dim)">Resume session:</div>
-          <div style="background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font-family:var(--mono); font-size:11px; color:var(--accent); word-break:break-all; user-select:all">claude --dangerously-skip-permissions --resume ${r.id}</div>
+          <div style="background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font-family:var(--mono); font-size:11px; color:var(--accent); word-break:break-all; user-select:all; margin-bottom:8px">claude --dangerously-skip-permissions --resume ${r.id}</div>
+          ${transcriptHtml}
         </div>
       </div>`
     }).join('')
@@ -250,7 +285,24 @@ function renderRuns(){
   if(combinedHtml!==lastRunsHtml){lastRunsHtml=combinedHtml;$('runs').innerHTML=combinedHtml}
 }
 $('runs').addEventListener('click',e=>{const c=e.target.closest('.run-card');if(!c)return;const id=c.dataset.run
-  openRuns.has(id)?openRuns.delete(id):openRuns.add(id);renderRuns();renderTimes()})
+  if(openRuns.has(id)){
+    openRuns.delete(id)
+    renderRuns();renderTimes()
+  } else {
+    openRuns.add(id)
+    const isPastSession = M.previousSessions && M.previousSessions.some(x => x.id === id)
+    if(isPastSession && !loadedTranscripts.has(id)){
+      fetch(`/session-transcript?id=${id}`)
+        .then(r => r.json())
+        .then(data => {
+          loadedTranscripts.set(id, data)
+          renderRuns()
+          renderTimes()
+        }).catch(()=>{})
+    }
+    renderRuns();renderTimes()
+  }
+})
 function renderTimes(){if(M)renderBadge();if(M)renderObserved();for(const el of document.querySelectorAll('.t-ago'))el.textContent=ago(+el.dataset.at)}
 function renderObserved(){const now=Date.now();const live={};for(const n of M.plan)if(n.level==='component')live[n.id]=n.touchedAt&&now-n.touchedAt<60000
   for(const g of document.querySelectorAll('g.gnode[data-id]')){g.classList.toggle('obs-live',!!live[g.dataset.id])
