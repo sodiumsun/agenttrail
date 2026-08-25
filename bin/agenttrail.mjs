@@ -444,6 +444,7 @@ for (const t of [3000, 8000]) setTimeout(discoverBoards, t).unref() // cold-star
 setInterval(discoverBoards, 30000).unref()
 
 // ---------- http ----------
+const sseSessions = new Map() // id -> response
 const indexPath = path.join(__dirname, '..', 'public', 'index.html')
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x')
@@ -465,8 +466,165 @@ const server = http.createServer((req, res) => {
       try { if (handleHookEvent(JSON.parse(body))) hookTick() } catch {}
       res.writeHead(200).end()
     })
+  } else if (u.pathname === '/sse') {
+    // MCP over SSE Transport connection
+    const sessionId = Math.random().toString(36).slice(2, 10)
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive'
+    })
+    sseSessions.set(sessionId, res)
+    res.write(`event: endpoint\ndata: ${encodeURIComponent(`/message?id=${sessionId}`)}\n\n`)
+    req.on('close', () => sseSessions.delete(sessionId))
+  } else if (u.pathname === '/message' && req.method === 'POST') {
+    const sessionId = u.searchParams.get('id')
+    let body = ''
+    req.on('data', c => body += c)
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'text/plain' }).end('accepted')
+      try {
+        const payload = JSON.parse(body)
+        const response = handleMcpMessage(payload)
+        const clientRes = sseSessions.get(sessionId)
+        if (clientRes && response) {
+          clientRes.write(`event: message\ndata: ${JSON.stringify(response)}\n\n`)
+        }
+      } catch {}
+    })
   } else res.writeHead(404).end()
 })
+
+// ---------- MCP protocol parser & tool executor ----------
+function handleMcpMessage(payload) {
+  if (payload.jsonrpc !== '2.0') return null
+  const id = payload.id
+  const method = payload.method
+  
+  if (method === 'initialize') {
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: {
+        protocolVersion: '2024-11-05',
+        capabilities: {
+          tools: {}
+        },
+        serverInfo: {
+          name: 'agenttrail',
+          version: '0.1.0'
+        }
+      }
+    }
+  }
+  
+  if (method === 'tools/list') {
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: {
+        tools: [
+          {
+            name: 'register_run',
+            description: 'Notify agenttrail that an agent has initiated an active session.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                session_id: { type: 'string', description: 'Unique session id or chat context id.' },
+                agent_name: { type: 'string', description: 'The name of the agent (e.g. gemini, cursor, copilot, codex).' }
+              },
+              required: ['session_id', 'agent_name']
+            }
+          },
+          {
+            name: 'post_tool_use',
+            description: 'Notify agenttrail that a tool is being invoked by the agent.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                session_id: { type: 'string' },
+                tool_name: { type: 'string', description: 'Name of the tool (e.g. bash, read, write).' },
+                tool_input: { type: 'string', description: 'Action inputs or shell command details.' },
+                status: { type: 'string', enum: ['start', 'complete'], description: 'Whether the tool is beginning or ending.' }
+              },
+              required: ['session_id', 'tool_name', 'status']
+            }
+          },
+          {
+            name: 'update_todos',
+            description: 'Update the live in-progress checklist of tasks.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                session_id: { type: 'string' },
+                todos: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      content: { type: 'string' },
+                      status: { type: 'string', enum: ['not_started', 'in_progress', 'completed'] }
+                    },
+                    required: ['content', 'status']
+                  }
+                }
+              },
+              required: ['session_id', 'todos']
+            }
+          }
+        ]
+      }
+    }
+  }
+  
+  if (method === 'tools/call') {
+    const toolName = payload.params?.name
+    const args = payload.params?.arguments || {}
+    let success = false
+    
+    if (toolName === 'register_run') {
+      success = handleHookEvent({
+        cwd: repo,
+        session_id: args.session_id,
+        hook_event_name: 'SessionStart',
+        agent: args.agent_name
+      })
+    } else if (toolName === 'post_tool_use') {
+      success = handleHookEvent({
+        cwd: repo,
+        session_id: args.session_id,
+        hook_event_name: args.status === 'start' ? 'PreToolUse' : 'PostToolUse',
+        tool_name: args.tool_name,
+        tool_input: { command: args.tool_input }
+      })
+    } else if (toolName === 'update_todos') {
+      success = handleHookEvent({
+        cwd: repo,
+        session_id: args.session_id,
+        hook_event_name: 'PostToolUse',
+        tool_name: 'TodoWrite',
+        tool_input: { todos: args.todos }
+      })
+    }
+    
+    if (success) hookTick()
+    
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: {
+        content: [
+          {
+            type: 'text',
+            text: success ? `Successfully synchronized state with agenttrail.` : `Could not sync state. Ensure session path is correct.`
+          }
+        ]
+      }
+    }
+  }
+  
+  return null
+}
 let lastHookTick = 0
 function hookTick() {
   const now = Date.now()
