@@ -69,6 +69,8 @@ const openGraphDetails=new Set(),openGraphTasks=new Set(),closedGraphTasks=new S
 const openFolders=new Set(),closedFolders=new Set();let lastReveal=new Set()
 const openRuns=new Set()
 const loadedTranscripts=new Map()
+const distillingSessions=new Map()
+const syncedSessions=new Set()
 const $=id=>document.getElementById(id)
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
 const md=text=>{
@@ -215,6 +217,40 @@ function movePan(e){if(!panGesture||panGesture.id!==e.pointerId)return;graphPan=
 function endPan(e){if(!panGesture||panGesture.id!==e.pointerId)return;$('graph-stage')?.classList.remove('dragging');panGesture=null}
 function copy(q){navigator.clipboard.writeText(q).then(()=>{const t=$('toast');t.textContent='Prompt copied — paste it to your agent in this repo';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600)})}
 function copyBackfill(){copy('Read the "agenttrail plan convention" section in CLAUDE.md or AGENTS.md. Then study this repo in trust order — the code and directory layout first (what exists), git log for what is actually recent, decision logs and any in-progress build/handoff docs for what is in flight, and README/roadmap prose LAST and only for open intent (founding docs rot; cross-check their claims against git log) — and rewrite PLAN.md as the real map of this codebase: components with stable {#id}s, needs:/links: edges between them, files: globs for the paths each owns, and verb-led concrete titles with tech: sublines. Keep it to 5-9 components no matter how big the repo — a component is a part one agent could own for a session, with its own doneness and at least one edge; anything smaller is a task inside one, and stable plumbing folds into a neighbor while active or planned areas get their own card. Verify every status against the CODE, not the docs — READMEs and roadmaps rot; mark [x] only after finding the implementing source or artifact, and cite that evidence on its tech: line (e.g. tech: TurnView.swift) so a human can audit every tick; if you cannot find evidence, leave it unchecked and say so in the decisions note. Statuses must be honest — [x] only for what verifiably exists, [~] only for what you are working on right now, everything else [ ]. Tag open tasks with an indented from: line naming provenance — from: agent when an in-progress build/handoff doc or your own declared intent claims it imminently, from: roadmap when sourced only from planning docs; omit when unsure. Record the backfill under ## decisions.')}
+
+function distillSession(id, event) {
+  event?.stopPropagation()
+  distillingSessions.set(id, { status: 'loading', text: '' })
+  renderRuns()
+  fetch(`/session-distill?id=${id}`)
+    .then(r => r.json())
+    .then(res => {
+      distillingSessions.set(id, { status: res.success ? 'done' : 'error', text: res.text })
+      renderRuns()
+    })
+    .catch(() => {
+      distillingSessions.set(id, { status: 'error', text: 'Error executing distiller.' })
+      renderRuns()
+    })
+}
+
+function syncVault(id, event) {
+  event?.stopPropagation()
+  fetch(`/session-sync-vault?id=${id}`)
+    .then(r => r.json())
+    .then(res => {
+      if (res.success) {
+        syncedSessions.add(id)
+        const t=$('toast');t.textContent='Successfully synced to Obsidian / CC Vault!';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600)
+      } else {
+        const t=$('toast');t.textContent='Please distill the session first before syncing!';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600)
+      }
+      renderRuns()
+    })
+    .catch(() => {
+      const t=$('toast');t.textContent='Sync failed!';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600)
+    })
+}
 function renderBoards(){
   const b=M.boards||[]
   const el=$('boards')
@@ -281,12 +317,43 @@ function renderRuns(){
           transcriptHtml = `<div style="margin-top:10px; font-size:11px; color:var(--faint); font-style:italic">Loading transcript...</div>`
         }
       }
+      
+      let distillActionHtml = ''
+      if (open) {
+        const dState = distillingSessions.get(r.id) || { status: 'idle', text: '' }
+        const isSynced = syncedSessions.has(r.id)
+        
+        let dButtonLabel = '📝 Distill'
+        if (dState.status === 'loading') dButtonLabel = '⏳ Distilling...'
+        else if (dState.status === 'done') dButtonLabel = '✓ Distilled'
+        
+        let syncButtonLabel = '📁 Sync to Vault'
+        if (isSynced) syncButtonLabel = '✓ Synced to Vault'
+        
+        let dTextHtml = ''
+        if (dState.status === 'done' || dState.status === 'error') {
+          dTextHtml = `<div style="margin-top:8px; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px; display:flex; flex-direction:column; gap:4px">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px">
+              <span style="font-family:var(--mono); font-size:10.5px; color:var(--accent)">Distilled Digest Markdown:</span>
+              <button class="btn" style="min-height:22px; padding:2px 8px; font-size:10px" onclick="copy(distillingSessions.get('${r.id}').text); event.stopPropagation()">Copy Digest</button>
+            </div>
+            <textarea readonly style="width:100%; height:120px; font-family:var(--mono); font-size:10.5px; background:transparent; border:0; color:var(--soft); resize:vertical; outline:none; white-space:pre" onclick="event.stopPropagation()">${esc(dState.text)}</textarea>
+          </div>`
+        }
+        
+        distillActionHtml = `<div style="display:flex; gap:6px; margin-top:8px; margin-bottom:8px">
+          <button class="btn accent" style="flex:1; min-height:28px; padding:2px 10px; font-size:11px" onclick="distillSession('${r.id}', event)" ${dState.status === 'loading' ? 'disabled' : ''}>${dButtonLabel}</button>
+          <button class="btn" style="flex:1; min-height:28px; padding:2px 10px; font-size:11px" onclick="syncVault('${r.id}', event)" ${dState.status !== 'done' || isSynced ? 'disabled' : ''}>${syncButtonLabel}</button>
+        </div>${dTextHtml}`
+      }
+      
       return`<div class="run-card ended ${open?'open':''}" data-run="${esc(r.id)}">
         <div class="run-head"><span class="run-agent"><svg viewBox="0 0 24 24"><path fill="${agentColor('claude')}" d="${icon||''}"/></svg></span><span class="run-name">claude</span><span class="run-elapsed"><span class="t-ago" data-at="${r.mtime}"></span></span></div>
         <div class="run-task" style="text-wrap:pretty; overflow:visible; white-space:normal; font-size:12px; color:var(--soft); line-height:16px">${esc(r.snippet)}</div>
         <div class="run-tool" style="margin-top:4px"><span class="tn" style="color:var(--faint)">${r.turns} turns · ${sizeStr}</span></div>
         <div class="run-detail" style="${open?'display:block':''}; margin-top:8px; border-top:1px solid var(--hover); padding-top:8px">
-          <div style="font-family:var(--mono); font-size:11px; margin-bottom:4px; color:var(--dim)">Resume session:</div>
+          ${distillActionHtml}
+          <div style="font-family:var(--mono); font-size:11px; margin-bottom:4px; color:var(--dim); margin-top:8px">Resume session:</div>
           <div style="background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font-family:var(--mono); font-size:11px; color:var(--accent); word-break:break-all; user-select:all; margin-bottom:8px">claude --dangerously-skip-permissions --resume ${r.id}</div>
           ${transcriptHtml}
         </div>

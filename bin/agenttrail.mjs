@@ -8,6 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import crypto from 'node:crypto'
+import { exec } from 'node:child_process'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -516,6 +517,37 @@ const server = http.createServer((req, res) => {
   } else if (u.pathname === '/session-transcript') {
     const sid = u.searchParams.get('id')
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(getSessionTranscript(sid)))
+  } else if (u.pathname === '/session-distill') {
+    const sid = u.searchParams.get('id')
+    const pythonScript = path.join(os.homedir(), 'work', 'sessions', 'sessions.py')
+    const cmd = `python3 "${pythonScript}" distill ${sid}`
+    exec(cmd, (err, stdout, stderr) => {
+      const distilledFile = path.join(os.homedir(), '.sessions', 'distilled', 'claude', `${sid}.md`)
+      let content = ''
+      try {
+        if (fs.existsSync(distilledFile)) {
+          content = fs.readFileSync(distilledFile, 'utf8')
+        }
+      } catch {}
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
+        success: !err && content.length > 0,
+        text: content || stdout || stderr || 'Could not distill session.'
+      }))
+    })
+  } else if (u.pathname === '/session-sync-vault') {
+    const sid = u.searchParams.get('id')
+    const distilledFile = path.join(os.homedir(), '.sessions', 'distilled', 'claude', `${sid}.md`)
+    const vaultDir = '/Users/esaruoho/work/cc/vault/sources/conversations'
+    const targetFile = path.join(vaultDir, `${sid}.md`)
+    let success = false
+    try {
+      if (fs.existsSync(distilledFile)) {
+        if (!fs.existsSync(vaultDir)) fs.mkdirSync(vaultDir, { recursive: true })
+        fs.copyFileSync(distilledFile, targetFile)
+        success = true
+      }
+    } catch {}
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ success, path: targetFile }))
   } else if (u.pathname === '/events') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
     res.write(`data: ${JSON.stringify(model())}\n\n`)
