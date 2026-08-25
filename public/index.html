@@ -23,7 +23,7 @@
 .zero-row .zf{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .zero-row .za{margin-left:auto;color:var(--faint);flex:none;font-variant-numeric:tabular-nums}
 .zero-empty{padding:14px 12px;color:var(--faint);font-size:12.5px}
-.runs{position:absolute;right:24px;top:24px;z-index:2;display:flex;flex-direction:column;gap:10px;width:340px;max-width:44vw}
+.runs{position:absolute;right:24px;top:24px;bottom:24px;z-index:2;display:flex;flex-direction:column;gap:10px;width:340px;max-width:44vw;overflow-y:auto;padding-right:4px}
 .run-card{padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:var(--surface);box-shadow:0 12px 40px #000;cursor:pointer;animation:reveal 500ms var(--ease) both}
 .run-head{display:flex;align-items:center;gap:8px}
 .run-agent{display:inline-flex;flex:none;width:16px;height:16px}
@@ -81,7 +81,7 @@ const statusLabel=s=>s==='done'?'Complete':s==='active'?'In progress':s==='block
 const es=new EventSource('/events');let connectionTimer=null
 es.onopen=()=>clearTimeout(connectionTimer)
 es.onmessage=e=>{clearTimeout(connectionTimer);const d=JSON.parse(e.data)
-  if(d.partial&&M){M.activity=d.activity;M.recentActivity=d.recentActivity;M.runs=d.runs||M.runs||[];for(const n of M.plan)if(n.level==='component'){n.touchedAt=d.touched[n.id]||null;n.recent=(d.compRecent||{})[n.id]||n.recent||[]}render();return}
+  if(d.partial&&M){M.activity=d.activity;M.recentActivity=d.recentActivity;M.runs=d.runs||M.runs||[];M.previousSessions=d.previousSessions||M.previousSessions||[];for(const n of M.plan)if(n.level==='component'){n.touchedAt=d.touched[n.id]||null;n.recent=(d.compRecent||{})[n.id]||n.recent||[]}render();return}
   M=d;for(const id of [...openGraphDetails])if(!M.plan.some(n=>n.id===id&&n.level==='component'))openGraphDetails.delete(id);for(const set of [openGraphTasks,closedGraphTasks])for(const id of [...set])if(!M.plan.some(n=>n.id===id&&n.level==='task'))set.delete(id);render()}
 es.onerror=()=>{if(!M){clearTimeout(connectionTimer);connectionTimer=setTimeout(renderConnectionError,1200)}}
 setInterval(()=>{if(M)renderTimes()},1000)
@@ -225,7 +225,29 @@ function renderRuns(){
       ${toolLine}
       <div class="run-detail">${todos}${hist?`<div style="margin-top:8px">${hist}</div>`:''}</div>
     </div>`}).join('')
-  if(html!==lastRunsHtml){lastRunsHtml=html;$('runs').innerHTML=html}
+  
+  const prevs=M.previousSessions||[]
+  let prevHtml=''
+  if(prevs.length){
+    prevHtml=`<div class="prev-sessions-header" style="margin: 16px 0 8px; font-weight: 600; font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.08em;">Previous Sessions</div>` +
+    prevs.map(r=>{
+      const icon=agentIcon('claude')
+      const sizeStr = r.size < 1024 ? `${r.size}B` : `${Math.round(r.size/1024)}K`
+      const open = openRuns.has(r.id)
+      return`<div class="run-card ended ${open?'open':''}" data-run="${esc(r.id)}">
+        <div class="run-head"><span class="run-agent"><svg viewBox="0 0 24 24"><path fill="${agentColor('claude')}" d="${icon||''}"/></svg></span><span class="run-name">claude</span><span class="run-elapsed"><span class="t-ago" data-at="${r.mtime}"></span></span></div>
+        <div class="run-task" style="text-wrap:pretty; overflow:visible; white-space:normal; font-size:12px; color:var(--soft); line-height:16px">${esc(r.snippet)}</div>
+        <div class="run-tool" style="margin-top:4px"><span class="tn" style="color:var(--faint)">${r.turns} turns · ${sizeStr}</span></div>
+        <div class="run-detail" style="${open?'display:block':''}; margin-top:8px; border-top:1px solid var(--hover); padding-top:8px">
+          <div style="font-family:var(--mono); font-size:11px; margin-bottom:4px; color:var(--dim)">Resume session:</div>
+          <div style="background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font-family:var(--mono); font-size:11px; color:var(--accent); word-break:break-all; user-select:all">claude --dangerously-skip-permissions --resume ${r.id}</div>
+        </div>
+      </div>`
+    }).join('')
+  }
+  
+  const combinedHtml = html + prevHtml
+  if(combinedHtml!==lastRunsHtml){lastRunsHtml=combinedHtml;$('runs').innerHTML=combinedHtml}
 }
 $('runs').addEventListener('click',e=>{const c=e.target.closest('.run-card');if(!c)return;const id=c.dataset.run
   openRuns.has(id)?openRuns.delete(id):openRuns.add(id);renderRuns();renderTimes()})

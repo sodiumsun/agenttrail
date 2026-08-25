@@ -264,11 +264,90 @@ rebuildMatchers()
 function safeRead(p) { try { return fs.readFileSync(p, 'utf8') } catch { return '' } }
 function statMtime(p) { try { return fs.statSync(p).mtimeMs } catch { return null } }
 
+// ---------- previous sessions ----------
+const sessionsCache = {} // path -> { mtime, size, turns, snippet }
+
+function encodeCwd(p) {
+  let resolved = p
+  try { resolved = fs.realpathSync(p) } catch {}
+  const out = []
+  for (let i = 0; i < resolved.length; i++) {
+    const ch = resolved[i]
+    const c = ch.charCodeAt(0)
+    if ((48 <= c && c <= 57) || (65 <= c && c <= 90) || (97 <= c && c <= 122)) {
+      out.push(ch)
+    } else {
+      out.push('-')
+    }
+  }
+  return out.join('')
+}
+
+function loadPreviousSessions() {
+  const projDir = path.join(os.homedir(), '.claude', 'projects', encodeCwd(repo))
+  const list = []
+  try {
+    if (fs.existsSync(projDir)) {
+      const names = fs.readdirSync(projDir)
+      for (const name of names) {
+        if (!name.endsWith('.jsonl')) continue
+        const fullPath = path.join(projDir, name)
+        let st
+        try { st = fs.statSync(fullPath) } catch { continue }
+        
+        let cached = sessionsCache[fullPath]
+        if (!cached || cached.mtime !== st.mtimeMs || cached.size !== st.size) {
+          let turns = 0
+          let snippet = ''
+          try {
+            const content = fs.readFileSync(fullPath, 'utf8')
+            const lines = content.split('\n')
+            for (const line of lines) {
+              if (!line.trim()) continue
+              try {
+                const d = JSON.parse(line)
+                if (d.type === 'user') {
+                  turns++
+                  if (!snippet) {
+                    const contentVal = d.message?.content
+                    if (typeof contentVal === 'string') {
+                      snippet = contentVal
+                    } else if (Array.isArray(contentVal)) {
+                      snippet = contentVal.map(x => x.text || '').join(' ')
+                    }
+                  }
+                }
+              } catch {}
+            }
+          } catch {}
+          cached = {
+            mtime: st.mtimeMs,
+            size: st.size,
+            turns,
+            snippet: snippet ? snippet.trim().replace(/\s+/g, ' ') : '(empty)',
+          }
+          sessionsCache[fullPath] = cached
+        }
+        
+        list.push({
+          id: name.slice(0, -6),
+          mtime: cached.mtime,
+          size: cached.size,
+          turns: cached.turns,
+          snippet: cached.snippet,
+        })
+      }
+    }
+  } catch {}
+  return list.sort((a, b) => b.mtime - a.mtime)
+}
+
 function model() {
   if (treeDirty) { tree = buildTree(repo); treeDirty = false }
   return {
     boards,
     runs: liveRuns(),
+    previousSessions: loadPreviousSessions(),
     session, plan: parsed.nodes.map(n => n.level === 'component' ? { ...n, touchedAt: compTouched[n.id] || null, recent: compRecent[n.id] || [] } : n), tree,
     planTitle: parsed.title,
     hasPlan: planText.length > 0, treeTruncated,
@@ -284,7 +363,7 @@ function send(obj) {
 function broadcast() { send(model()) }
 // activity ticks carry only what moved — the 600KB tree stays home
 function broadcastTick() {
-  send({ partial: true, runs: liveRuns(), activity, recentActivity, touched: { ...compTouched }, compRecent, now: Date.now() })
+  send({ partial: true, runs: liveRuns(), previousSessions: loadPreviousSessions(), activity, recentActivity, touched: { ...compTouched }, compRecent, now: Date.now() })
 }
 
 // ---------- watcher ----------
