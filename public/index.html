@@ -71,6 +71,7 @@ const openRuns=new Set()
 const loadedTranscripts=new Map()
 const distillingSessions=new Map()
 const syncedSessions=new Set()
+const conveyingSessions=new Map()
 const $=id=>document.getElementById(id)
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
 const md=text=>{
@@ -251,6 +252,35 @@ function syncVault(id, event) {
       const t=$('toast');t.textContent='Sync failed!';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600)
     })
 }
+
+function conveyResume(id, event) {
+  event?.stopPropagation()
+  const to = $(`convey-to-${id}`).value
+  const profile = $(`convey-profile-${id}`).value
+  const ask = $(`convey-ask-${id}`).value
+  
+  conveyingSessions.set(id, { status: 'loading', reply: '', resume: '' })
+  renderRuns()
+  
+  const url = `/session-convey-resume?id=${id}&to=${encodeURIComponent(to)}&profile=${encodeURIComponent(profile)}&ask=${encodeURIComponent(ask)}`
+  fetch(url)
+    .then(r => r.json())
+    .then(res => {
+      conveyingSessions.set(id, {
+        status: res.success ? 'done' : 'error',
+        reply: res.reply || res.error || 'Failed to convey.',
+        resume: res.resumeCommand || ''
+      })
+      if (res.success) {
+        const t=$('toast');t.textContent='Successfully swindled conversation elsewhere!';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600)
+      }
+      renderRuns()
+    })
+    .catch(() => {
+      conveyingSessions.set(id, { status: 'error', reply: 'Error invoking convey script.', resume: '' })
+      renderRuns()
+    })
+}
 function renderBoards(){
   const b=M.boards||[]
   const el=$('boards')
@@ -319,17 +349,18 @@ function renderRuns(){
       }
       
       let distillActionHtml = ''
+      let conveyActionHtml = ''
       if (open) {
         const dState = distillingSessions.get(r.id) || { status: 'idle', text: '' }
         const isSynced = syncedSessions.has(r.id)
-        
+
         let dButtonLabel = '📝 Distill'
         if (dState.status === 'loading') dButtonLabel = '⏳ Distilling...'
         else if (dState.status === 'done') dButtonLabel = '✓ Distilled'
-        
+
         let syncButtonLabel = '📁 Sync to Vault'
         if (isSynced) syncButtonLabel = '✓ Synced to Vault'
-        
+
         let dTextHtml = ''
         if (dState.status === 'done' || dState.status === 'error') {
           dTextHtml = `<div style="margin-top:8px; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px; display:flex; flex-direction:column; gap:4px">
@@ -340,13 +371,64 @@ function renderRuns(){
             <textarea readonly style="width:100%; height:120px; font-family:var(--mono); font-size:10.5px; background:transparent; border:0; color:var(--soft); resize:vertical; outline:none; white-space:pre" onclick="event.stopPropagation()">${esc(dState.text)}</textarea>
           </div>`
         }
-        
+
         distillActionHtml = `<div style="display:flex; gap:6px; margin-top:8px; margin-bottom:8px">
           <button class="btn accent" style="flex:1; min-height:28px; padding:2px 10px; font-size:11px" onclick="distillSession('${r.id}', event)" ${dState.status === 'loading' ? 'disabled' : ''}>${dButtonLabel}</button>
           <button class="btn" style="flex:1; min-height:28px; padding:2px 10px; font-size:11px" onclick="syncVault('${r.id}', event)" ${dState.status !== 'done' || isSynced ? 'disabled' : ''}>${syncButtonLabel}</button>
         </div>${dTextHtml}`
+
+        const cState = conveyingSessions.get(r.id) || { status: 'idle', reply: '', resume: '' }
+        let conveyButtonLabel = '🚀 Swindle Resume'
+        if (cState.status === 'loading') conveyButtonLabel = '⏳ Swindling...'
+        else if (cState.status === 'done') conveyButtonLabel = '✓ Swindled!'
+
+        let cResultHtml = ''
+        if (cState.status === 'done' || cState.status === 'error') {
+          cResultHtml = `<div style="margin-top:8px; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px; display:flex; flex-direction:column; gap:4px">
+            <div style="font-family:var(--mono); font-size:10.5px; color:var(--accent)">Convey Output / Response:</div>
+            <textarea readonly style="width:100%; height:110px; font-family:var(--mono); font-size:10.5px; background:transparent; border:0; color:var(--soft); resize:vertical; outline:none; white-space:pre" onclick="event.stopPropagation()">${esc(cState.reply)}</textarea>
+            ${cState.resume ? `
+              <div style="font-family:var(--mono); font-size:10.5px; color:var(--dim); margin-top:4px">New Resume Command:</div>
+              <div style="background:var(--hover); border:1px solid var(--line); border-radius:4px; padding:4px 6px; font-family:var(--mono); font-size:10.5px; color:var(--accent); word-break:break-all; user-select:all" onclick="event.stopPropagation()">${esc(cState.resume)}</div>
+            ` : ''}
+          </div>`
+        }
+
+        conveyActionHtml = `
+          <div style="margin-top:12px; border-top:1px solid var(--hover); padding-top:10px; display:flex; flex-direction:column; gap:6px" onclick="event.stopPropagation()">
+            <div style="font-family:var(--mono); font-size:11px; color:var(--faint); font-weight:600; text-transform:uppercase; letter-spacing:0.04em">Swindle into another service (Convey):</div>
+            <div style="display:flex; gap:6px">
+              <div style="flex:1; display:flex; flex-direction:column; gap:2px">
+                <span style="font-size:10px; color:var(--dim)">Target Agent:</span>
+                <select id="convey-to-${r.id}" style="background:var(--hover); border:1px solid var(--line); border-radius:6px; padding:4px; font-size:11px; color:var(--text); outline:none">
+                  <option value="copilot">copilot</option>
+                  <option value="gemini">gemini</option>
+                  <option value="cursor">cursor</option>
+                  <option value="codex">codex</option>
+                  <option value="claude">claude</option>
+                  <option value="converse">converse</option>
+                </select>
+              </div>
+              <div style="flex:1; display:flex; flex-direction:column; gap:2px">
+                <span style="font-size:10px; color:var(--dim)">Standing Rules / Profile:</span>
+                <select id="convey-profile-${r.id}" style="background:var(--hover); border:1px solid var(--line); border-radius:6px; padding:4px; font-size:11px; color:var(--text); outline:none">
+                  <option value="free-energy">free-energy</option>
+                  <option value="paketti">paketti</option>
+                  <option value="apple">apple</option>
+                  <option value="convey">convey</option>
+                </select>
+              </div>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:2px">
+              <span style="font-size:10px; color:var(--dim)">Optional Ask Question (Prompt):</span>
+              <input id="convey-ask-${r.id}" type="text" placeholder="asks for the most useful next step" style="background:var(--hover); border:1px solid var(--line); border-radius:6px; padding:4px 8px; font-size:11px; color:var(--text); outline:none" />
+            </div>
+            <button class="btn accent" style="width:100%; min-height:28px; padding:4px 10px; font-size:11px; margin-top:4px" onclick="conveyResume('${r.id}', event)" ${cState.status === 'loading' ? 'disabled' : ''}>${conveyButtonLabel}</button>
+            ${cResultHtml}
+          </div>
+        `
       }
-      
+
       return`<div class="run-card ended ${open?'open':''}" data-run="${esc(r.id)}">
         <div class="run-head"><span class="run-agent"><svg viewBox="0 0 24 24"><path fill="${agentColor('claude')}" d="${icon||''}"/></svg></span><span class="run-name">claude</span><span class="run-elapsed"><span class="t-ago" data-at="${r.mtime}"></span></span></div>
         <div class="run-task" style="text-wrap:pretty; overflow:visible; white-space:normal; font-size:12px; color:var(--soft); line-height:16px">${esc(r.snippet)}</div>
@@ -355,6 +437,7 @@ function renderRuns(){
           ${distillActionHtml}
           <div style="font-family:var(--mono); font-size:11px; margin-bottom:4px; color:var(--dim); margin-top:8px">Resume session:</div>
           <div style="background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font-family:var(--mono); font-size:11px; color:var(--accent); word-break:break-all; user-select:all; margin-bottom:8px">claude --dangerously-skip-permissions --resume ${r.id}</div>
+          ${conveyActionHtml}
           ${transcriptHtml}
         </div>
       </div>`
