@@ -8,6 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import crypto from 'node:crypto'
+import { exec } from 'node:child_process'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -264,11 +265,149 @@ rebuildMatchers()
 function safeRead(p) { try { return fs.readFileSync(p, 'utf8') } catch { return '' } }
 function statMtime(p) { try { return fs.statSync(p).mtimeMs } catch { return null } }
 
+// ---------- previous sessions ----------
+const sessionsCache = {} // path -> { mtime, size, turns, snippet }
+
+function encodeCwd(p) {
+  let resolved = p
+  try { resolved = fs.realpathSync(p) } catch {}
+  const out = []
+  for (let i = 0; i < resolved.length; i++) {
+    const ch = resolved[i]
+    const c = ch.charCodeAt(0)
+    if ((48 <= c && c <= 57) || (65 <= c && c <= 90) || (97 <= c && c <= 122)) {
+      out.push(ch)
+    } else {
+      out.push('-')
+    }
+  }
+  return out.join('')
+}
+
+function loadPreviousSessions() {
+  const projDir = path.join(os.homedir(), '.claude', 'projects', encodeCwd(repo))
+  const list = []
+  try {
+    if (fs.existsSync(projDir)) {
+      const names = fs.readdirSync(projDir)
+      for (const name of names) {
+        if (!name.endsWith('.jsonl')) continue
+        const fullPath = path.join(projDir, name)
+        let st
+        try { st = fs.statSync(fullPath) } catch { continue }
+        
+        let cached = sessionsCache[fullPath]
+        if (!cached || cached.mtime !== st.mtimeMs || cached.size !== st.size) {
+          let turns = 0
+          let snippet = ''
+          try {
+            const content = fs.readFileSync(fullPath, 'utf8')
+            const lines = content.split('\n')
+            for (const line of lines) {
+              if (!line.trim()) continue
+              try {
+                const d = JSON.parse(line)
+                if (d.type === 'user') {
+                  turns++
+                  if (!snippet) {
+                    const contentVal = d.message?.content
+                    if (typeof contentVal === 'string') {
+                      snippet = contentVal
+                    } else if (Array.isArray(contentVal)) {
+                      snippet = contentVal.map(x => x.text || '').join(' ')
+                    }
+                  }
+                }
+              } catch {}
+            }
+          } catch {}
+          cached = {
+            mtime: st.mtimeMs,
+            size: st.size,
+            turns,
+            snippet: snippet ? snippet.trim().replace(/\s+/g, ' ') : '(empty)',
+          }
+          sessionsCache[fullPath] = cached
+        }
+        
+        list.push({
+          id: name.slice(0, -6),
+          mtime: cached.mtime,
+          size: cached.size,
+          turns: cached.turns,
+          snippet: cached.snippet,
+        })
+      }
+    }
+  } catch {}
+  return list.sort((a, b) => b.mtime - a.mtime)
+}
+
+function getSessionTranscript(sessionId) {
+  const projDir = path.join(os.homedir(), '.claude', 'projects', encodeCwd(repo))
+  const fullPath = path.join(projDir, `${sessionId}.jsonl`)
+  const transcript = []
+  try {
+    if (fs.existsSync(fullPath)) {
+      const content = fs.readFileSync(fullPath, 'utf8')
+      const lines = content.split('\n')
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const d = JSON.parse(line)
+          const t = d.type
+          if (t === 'user') {
+            let text = ''
+            const contentVal = d.message?.content
+            if (typeof contentVal === 'string') {
+              text = contentVal
+            } else if (Array.isArray(contentVal)) {
+              text = contentVal.map(x => x.text || '').join(' ')
+            }
+            transcript.push({
+              role: 'user',
+              text: text.trim(),
+              timestamp: d.timestamp ? new Date(d.timestamp).getTime() : null
+            })
+          } else if (t === 'assistant') {
+            let text = ''
+            const contentVal = d.message?.content
+            if (typeof contentVal === 'string') {
+              text = contentVal
+            } else if (Array.isArray(contentVal)) {
+              text = contentVal.filter(x => x.type === 'text').map(x => x.text || '').join('\n')
+            }
+            
+            const tools = []
+            if (Array.isArray(contentVal)) {
+              contentVal.filter(x => x.type === 'tool_use').forEach(x => {
+                tools.push({
+                  name: x.name,
+                  input: typeof x.input === 'object' ? JSON.stringify(x.input) : String(x.input || '')
+                })
+              })
+            }
+            
+            transcript.push({
+              role: 'assistant',
+              text: text.trim(),
+              tools,
+              timestamp: d.timestamp ? new Date(d.timestamp).getTime() : null
+            })
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+  return transcript
+}
+
 function model() {
   if (treeDirty) { tree = buildTree(repo); treeDirty = false }
   return {
     boards,
     runs: liveRuns(),
+    previousSessions: loadPreviousSessions(),
     session, plan: parsed.nodes.map(n => n.level === 'component' ? { ...n, touchedAt: compTouched[n.id] || null, recent: compRecent[n.id] || [] } : n), tree,
     planTitle: parsed.title,
     hasPlan: planText.length > 0, treeTruncated,
@@ -284,7 +423,7 @@ function send(obj) {
 function broadcast() { send(model()) }
 // activity ticks carry only what moved — the 600KB tree stays home
 function broadcastTick() {
-  send({ partial: true, runs: liveRuns(), activity, recentActivity, touched: { ...compTouched }, compRecent, now: Date.now() })
+  send({ partial: true, runs: liveRuns(), previousSessions: loadPreviousSessions(), activity, recentActivity, touched: { ...compTouched }, compRecent, now: Date.now() })
 }
 
 // ---------- watcher ----------
@@ -365,6 +504,7 @@ for (const t of [3000, 8000]) setTimeout(discoverBoards, t).unref() // cold-star
 setInterval(discoverBoards, 30000).unref()
 
 // ---------- http ----------
+const sseSessions = new Map() // id -> response
 const indexPath = path.join(__dirname, '..', 'public', 'index.html')
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x')
@@ -374,6 +514,40 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ project: session.project, port }))
   } else if (u.pathname === '/model') {
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(model()))
+  } else if (u.pathname === '/session-transcript') {
+    const sid = u.searchParams.get('id')
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(getSessionTranscript(sid)))
+  } else if (u.pathname === '/session-distill') {
+    const sid = u.searchParams.get('id')
+    const pythonScript = path.join(os.homedir(), 'work', 'sessions', 'sessions.py')
+    const cmd = `python3 "${pythonScript}" distill ${sid}`
+    exec(cmd, (err, stdout, stderr) => {
+      const distilledFile = path.join(os.homedir(), '.sessions', 'distilled', 'claude', `${sid}.md`)
+      let content = ''
+      try {
+        if (fs.existsSync(distilledFile)) {
+          content = fs.readFileSync(distilledFile, 'utf8')
+        }
+      } catch {}
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
+        success: !err && content.length > 0,
+        text: content || stdout || stderr || 'Could not distill session.'
+      }))
+    })
+  } else if (u.pathname === '/session-sync-vault') {
+    const sid = u.searchParams.get('id')
+    const distilledFile = path.join(os.homedir(), '.sessions', 'distilled', 'claude', `${sid}.md`)
+    const vaultDir = path.join(os.homedir(), 'work', 'cc', 'vault', 'sources', 'conversations')
+    const targetFile = path.join(vaultDir, `${sid}.md`)
+    let success = false
+    try {
+      if (fs.existsSync(distilledFile)) {
+        if (!fs.existsSync(vaultDir)) fs.mkdirSync(vaultDir, { recursive: true })
+        fs.copyFileSync(distilledFile, targetFile)
+        success = true
+      }
+    } catch {}
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ success, path: targetFile }))
   } else if (u.pathname === '/events') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
     res.write(`data: ${JSON.stringify(model())}\n\n`)
@@ -386,8 +560,165 @@ const server = http.createServer((req, res) => {
       try { if (handleHookEvent(JSON.parse(body))) hookTick() } catch {}
       res.writeHead(200).end()
     })
+  } else if (u.pathname === '/sse') {
+    // MCP over SSE Transport connection
+    const sessionId = Math.random().toString(36).slice(2, 10)
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive'
+    })
+    sseSessions.set(sessionId, res)
+    res.write(`event: endpoint\ndata: ${encodeURIComponent(`/message?id=${sessionId}`)}\n\n`)
+    req.on('close', () => sseSessions.delete(sessionId))
+  } else if (u.pathname === '/message' && req.method === 'POST') {
+    const sessionId = u.searchParams.get('id')
+    let body = ''
+    req.on('data', c => body += c)
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'text/plain' }).end('accepted')
+      try {
+        const payload = JSON.parse(body)
+        const response = handleMcpMessage(payload)
+        const clientRes = sseSessions.get(sessionId)
+        if (clientRes && response) {
+          clientRes.write(`event: message\ndata: ${JSON.stringify(response)}\n\n`)
+        }
+      } catch {}
+    })
   } else res.writeHead(404).end()
 })
+
+// ---------- MCP protocol parser & tool executor ----------
+function handleMcpMessage(payload) {
+  if (payload.jsonrpc !== '2.0') return null
+  const id = payload.id
+  const method = payload.method
+  
+  if (method === 'initialize') {
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: {
+        protocolVersion: '2024-11-05',
+        capabilities: {
+          tools: {}
+        },
+        serverInfo: {
+          name: 'agenttrail',
+          version: '0.1.0'
+        }
+      }
+    }
+  }
+  
+  if (method === 'tools/list') {
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: {
+        tools: [
+          {
+            name: 'register_run',
+            description: 'Notify agenttrail that an agent has initiated an active session.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                session_id: { type: 'string', description: 'Unique session id or chat context id.' },
+                agent_name: { type: 'string', description: 'The name of the agent (e.g. gemini, cursor, copilot, codex).' }
+              },
+              required: ['session_id', 'agent_name']
+            }
+          },
+          {
+            name: 'post_tool_use',
+            description: 'Notify agenttrail that a tool is being invoked by the agent.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                session_id: { type: 'string' },
+                tool_name: { type: 'string', description: 'Name of the tool (e.g. bash, read, write).' },
+                tool_input: { type: 'string', description: 'Action inputs or shell command details.' },
+                status: { type: 'string', enum: ['start', 'complete'], description: 'Whether the tool is beginning or ending.' }
+              },
+              required: ['session_id', 'tool_name', 'status']
+            }
+          },
+          {
+            name: 'update_todos',
+            description: 'Update the live in-progress checklist of tasks.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                session_id: { type: 'string' },
+                todos: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      content: { type: 'string' },
+                      status: { type: 'string', enum: ['not_started', 'in_progress', 'completed'] }
+                    },
+                    required: ['content', 'status']
+                  }
+                }
+              },
+              required: ['session_id', 'todos']
+            }
+          }
+        ]
+      }
+    }
+  }
+  
+  if (method === 'tools/call') {
+    const toolName = payload.params?.name
+    const args = payload.params?.arguments || {}
+    let success = false
+    
+    if (toolName === 'register_run') {
+      success = handleHookEvent({
+        cwd: repo,
+        session_id: args.session_id,
+        hook_event_name: 'SessionStart',
+        agent: args.agent_name
+      })
+    } else if (toolName === 'post_tool_use') {
+      success = handleHookEvent({
+        cwd: repo,
+        session_id: args.session_id,
+        hook_event_name: args.status === 'start' ? 'PreToolUse' : 'PostToolUse',
+        tool_name: args.tool_name,
+        tool_input: { command: args.tool_input }
+      })
+    } else if (toolName === 'update_todos') {
+      success = handleHookEvent({
+        cwd: repo,
+        session_id: args.session_id,
+        hook_event_name: 'PostToolUse',
+        tool_name: 'TodoWrite',
+        tool_input: { todos: args.todos }
+      })
+    }
+    
+    if (success) hookTick()
+    
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: {
+        content: [
+          {
+            type: 'text',
+            text: success ? `Successfully synchronized state with agenttrail.` : `Could not sync state. Ensure session path is correct.`
+          }
+        ]
+      }
+    }
+  }
+  
+  return null
+}
 let lastHookTick = 0
 function hookTick() {
   const now = Date.now()
