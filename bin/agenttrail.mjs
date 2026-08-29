@@ -252,11 +252,22 @@ function handleHookEvent(ev) {
   } else return false
   return true
 }
+let cycles = [] // saved history: [{start,end,sessions:[{agent,componentId,tools}]}]
+function archiveRun(r) {
+  const start = r.startedAt, end = r.lastEventAt
+  let c = cycles.find(c => start <= c.end + 30 * 60e3 && end >= c.start - 30 * 60e3)
+  if (!c) { c = { start, end, sessions: [] }; cycles.push(c) }
+  c.start = Math.min(c.start, start); c.end = Math.max(c.end, end)
+  c.sessions.push({ agent: r.agent, componentId: r.componentId, tools: (r.recentTools || []).length, todosDone: (r.todos || []).filter(t => t.status === 'completed').length })
+  cycles.sort((a, b) => b.start - a.start)
+  if (cycles.length > 30) cycles.length = 30
+  stateDirty = true
+}
 function liveRuns() {
   const now = Date.now()
   for (const [id, r] of Object.entries(runs)) {
     if (!r.ended && now - r.lastEventAt > 15 * 60e3) { r.ended = true; r.currentTool = null } // missed Stop
-    if (now - r.lastEventAt > 2 * 3600e3) delete runs[id] // 2h trail, then gone
+    if (now - r.lastEventAt > 2 * 3600e3) { archiveRun(r); delete runs[id] } // 2h trail → saved cycle record
   }
   return Object.values(runs).sort((a, b) => a.startedAt - b.startedAt)
 }
@@ -271,6 +282,7 @@ function loadState() {
     activity = st.activity || null
     recentActivity = st.recentActivity || []
     Object.assign(runs, st.runs || {})
+    cycles = st.cycles || []
     Object.assign(compTouched, st.compTouched || {})
     Object.assign(compRecent, st.compRecent || {})
     Object.assign(fileHeat, st.fileHeat || {})
@@ -281,7 +293,7 @@ function saveState() {
   stateDirty = false
   try {
     fs.mkdirSync(path.dirname(stateFile), { recursive: true })
-    fs.writeFileSync(stateFile, JSON.stringify({ repoPath: repo, port, activity, recentActivity, compTouched, compRecent, runs, fileHeat }))
+    fs.writeFileSync(stateFile, JSON.stringify({ repoPath: repo, port, activity, recentActivity, compTouched, compRecent, runs, fileHeat, cycles }))
   } catch {}
 }
 loadState()
@@ -381,7 +393,7 @@ function model() {
     session, plan: parsed.nodes.map(n => n.level === 'component' ? { ...n, touchedAt: compTouched[n.id] || null, recent: compRecent[n.id] || [], filesList: compFilesFor(n.id) } : n), tree,
     planTitle: parsed.title,
     hasPlan: planText.length > 0, treeTruncated,
-    activity, recentActivity, planMtime, handoffs, hotFiles: hotFiles(),
+    activity, recentActivity, planMtime, handoffs, hotFiles: hotFiles(), cycles,
     planStale: planStaleness(), lints: lintPlan(), hooksInstalled: hooksInstalled(),
     now: Date.now(),
   }
