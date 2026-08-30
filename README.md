@@ -10,6 +10,7 @@
 **Know what your coding agents are doing, while they are doing it.**
 
 [![npm](https://img.shields.io/npm/v/agenttrail?color=e9a23b&label=npm)](https://www.npmjs.com/package/agenttrail)
+[![downloads](https://img.shields.io/npm/dm/agenttrail?color=e9a23b&label=downloads)](https://www.npmjs.com/package/agenttrail)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![node](https://img.shields.io/badge/node-%E2%89%A520-2dd4bf)](package.json)
 [![stars](https://img.shields.io/github/stars/sodiumsun/agenttrail?style=social)](https://github.com/sodiumsun/agenttrail)
