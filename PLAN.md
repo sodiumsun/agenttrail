@@ -74,7 +74,17 @@ files: [public/**, assets/brand/**]
   by: codex
   from: agent
   tech: warm active surface + stronger outline + accent-tinted depth
+- [x] Keep past cycles out of the live map {#map-cycle-history}
+  by: codex
+  from: agent
+  tech: canvas history control + closed-by-default right drawer in public/index.html
 
+- [x] Knowledge components render with a purple accent {#map-knowledge-kind}
+  tech: kind: knowledge parsed by KIND_RE; .gnode.knowledge tokens both themes
+  by: claude
+- [x] Set up an unmapped repo from its card {#map-setup-button}
+  tech: Set up the map button -> /setup-board relay -> sibling /setup runs init
+  by: claude
 ## Show the repo like an editor {#explorer}
 tech: vs-code-style file tree
 needs: [watcher]
@@ -111,6 +121,12 @@ files: [bin/**, public/**]
   by: claude
   tech: hooksInstalled flag; hints for no-hooks and pre-hook sessions
 
+- [x] Group live sessions into cycles in the runs dock {#runs-cycle-groups}
+  tech: temporal burst grouping in renderRuns, public/index.html
+  by: claude
+- [x] Save ended cycles as durable history {#runs-cycle-history}
+  tech: archiveRun + cycles[] persisted in bin/agenttrail.mjs; Past cycles rows in the dock
+  by: claude
 ## See the whole fleet {#fleet}
 tech: /summary + /fleet aggregation; zoom-out altitude with live repo cards
 needs: [runs]
@@ -179,6 +195,7 @@ files: [README.md, docs/**, package.json]
   tech: README definition, sentence-case headings, npm metadata, GitHub description and topics
 
 ## decisions
+- 2026-08-30: cycles + kind: knowledge + card-setup graduated into the plan after the board flagged PLAN BEHIND — the observed layer caught an undeclared build burst
 - 2026-08-21: spine is the codebase (fs watcher + PLAN.md), not agent hooks; hooks become an optional fidelity adapter
 - 2026-08-21: serve index.html fresh per request (no startup cache) so UI edits land without daemon restart
 - 2026-08-21: filter editor atomic-write tmp files from the activity signal
@@ -193,3 +210,4 @@ files: [README.md, docs/**, package.json]
 - 2026-08-27: fleet page retired — the world IS the map; regions LOD from name-card to full board at 30%; tabs and run cards fly the camera instead of navigating; sidebar is multi-root with lazy sibling trees
 - 2026-08-27: light mode is a token-only UI variant — dark stays the default, the top-bar switch persists locally, and no layout or product behavior changes
 - 2026-08-27: theme branding uses one app-icon design — light keeps the colorful original; dark is the same rounded-square composition in a night palette
+- 2026-08-29: archived cycles are secondary history, not live run cards — open them from the canvas controls in a right-side drawer so the map stays primary
