@@ -88,6 +88,9 @@ files: [public/**, assets/brand/**]
 - [x] Cards with live work auto-unfold at any zoom {#map-live-unfold}
   tech: isUnfolded/compLive in public/index.html; folds back ~60s after activity stops
   by: claude
+- [x] Human steps render dashed with an attention badge until their work clears {#map-human-kind}
+  tech: kind: human + url: in the convention; amber ! while open tasks remain; OPEN link on cards
+  by: claude
 ## Show the repo like an editor {#explorer}
 tech: vs-code-style file tree
 needs: [watcher]
