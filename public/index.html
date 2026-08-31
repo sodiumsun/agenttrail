@@ -80,6 +80,12 @@ body.hide-runs .runs,body.hide-runs .task-capsule.sess{display:none!important}
 .cycle-row{display:flex;gap:8px;align-items:baseline;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:var(--overlay);font-size:11.5px;line-height:15px;color:var(--dim)}
 .cycle-when{flex:none;color:var(--faint);font:500 10px var(--mono)}
 .cycle-what{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.run-sub{display:flex;align-items:center;gap:7px;margin-top:6px;padding:4px 8px;border-radius:7px;background:var(--hover);font-size:11.5px;color:var(--dim)}
+.run-sub.ended{background:transparent;opacity:.55}
+.run-sub-dot{width:5px;height:5px;border-radius:50%;background:var(--accent);animation:working-pulse 1.6s ease-in-out infinite}
+.run-sub-tick{color:var(--success);font-size:10px}
+.run-sub-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.run-sub-ago{color:var(--faint);font:400 10px var(--mono)}
 .run-cycle{margin:4px 2px 0;color:var(--faint);font:600 10.5px var(--mono);letter-spacing:.08em;text-transform:uppercase}
 .run-card{padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:var(--overlay);box-shadow:0 12px 40px var(--shadow-strong);cursor:pointer;animation:reveal 500ms var(--ease) both}
 .run-head{display:flex;align-items:center;gap:8px}
@@ -122,7 +128,9 @@ body.hide-runs .runs,body.hide-runs .task-capsule.sess{display:none!important}
 <div class="toast" id="toast" role="status"></div>
 <script>
 let M=null,W=[],BP='',lastGraphKey='',graphPos={},regions={},minZoom=0.15,graphZoom=1,graphPan={x:0,y:0},graphSize={width:0,height:0},graphNeedsFit=true,panGesture=null
-const openGraphDetails=new Set(),openGraphTasks=new Set(),closedGraphTasks=new Set()
+const openGraphDetails=new Set(),openGraphTasks=new Set(),closedGraphTasks=new Set(),closedGraphDetails=new Set()
+function compLive(p){return p.status==='active'||(p.touchedAt&&Date.now()-p.touchedAt<60000)||((M&&M.runs)||[]).some(r=>!r.ended&&r.componentId===p.id)}
+function isUnfolded(p){const k=ns(p.id);if(closedGraphDetails.has(k))return false;return openGraphDetails.has(k)||compLive(p)}
 const openFolders=new Set(),closedFolders=new Set();let lastReveal=new Set()
 const ns=id=>BP+':'+id
 const expandedRoots=new Set(),treeCache={}
@@ -192,7 +200,7 @@ function render(){
   document.title=`agenttrail · ${M.session.project}`
   renderTree();renderRuns()
   const bs=W.length?W:(M?[M]:[])
-  const graphKey=JSON.stringify(bs.map(b=>[b.port,JSON.stringify(b.plan,(k,v)=>(k==='touchedAt'||k==='recent')?undefined:v),(b.runs||[]).map(r=>[r.componentId,r.ended,r.todos,(r.path||[]).length]),(b.handoffs||[]).length,b.plan.filter(n=>n.level==='component').map(n=>n.touchedAt&&Date.now()-n.touchedAt<60000?1:0).join('')]))+'|'+String(graphZoom<CARD_LOD)
+  const graphKey=JSON.stringify(bs.map(b=>[b.port,JSON.stringify(b.plan,(k,v)=>(k==='touchedAt'||k==='recent')?undefined:v),(b.runs||[]).map(r=>[r.componentId,r.ended,r.todos,(r.path||[]).length,(r.subagents||[]).map(x=>x.name+(x.ended?1:0)).join()]),(b.handoffs||[]).length,b.plan.filter(n=>n.level==='component').map(n=>n.touchedAt&&Date.now()-n.touchedAt<60000?1:0).join('')]))+'|'+String(graphZoom<CARD_LOD)
   if(graphKey!==lastGraphKey){lastGraphKey=graphKey;renderGraph()}
   renderTimes()
 }
@@ -340,7 +348,7 @@ function renderGraph(){
   renderMinimap();applyOverlays();$('graph-stage').addEventListener('wheel',onGraphWheel,{passive:false});if(graphNeedsFit){graphNeedsFit=false;requestAnimationFrame(fitGraph)}
 }
 function graphDetailHeight(p){const list=kids(p.id),openRows=list.filter(graphTaskIsOpen).reduce((a,t)=>a+16+Math.max(graphTaskDetails(t).rows.length,5)*20,0);const sessN=(M.runs||[]).filter(r=>r.componentId===p.id).reduce((a,r)=>a+(r.todos||[]).length,0)+((p.touchedAt&&Date.now()-p.touchedAt<60000&&!list.some(k=>k.status==='active'||k.status==='blocked'))?1:0);return (list.length+sessN)?(list.length+sessN)*44+Math.max(0,list.length+sessN-1)+openRows:64}
-function graphNodeMetrics(p){const nodeW=400;let nodeH=128;if(fileMode&&(p.filesList||[]).length)nodeH=110+Math.ceil(Math.min(p.filesList.length,8)/2)*24+(p.filesList.length>8?30:10);if(!openGraphDetails.has(ns(p.id)))return{w:nodeW,h:nodeH,nodeW,nodeH,detailW:0,detailH:0};const detailW=400,detailH=graphDetailHeight(p);return{w:detailW,h:nodeH+24+detailH,nodeW,nodeH,detailW,detailH}}
+function graphNodeMetrics(p){const nodeW=400;let nodeH=128;if(fileMode&&(p.filesList||[]).length)nodeH=110+Math.ceil(Math.min(p.filesList.length,8)/2)*24+(p.filesList.length>8?30:10);if(!isUnfolded(p))return{w:nodeW,h:nodeH,nodeW,nodeH,detailW:0,detailH:0};const detailW=400,detailH=graphDetailHeight(p);return{w:detailW,h:nodeH+24+detailH,nodeW,nodeH,detailW,detailH}}
 function graphEdge(source,target,pos,handoff){if(!source||!pos[source.id]||!pos[target.id])return'';const a=pos[source.id],b=pos[target.id],x1=a.nodeX+a.nodeW,y1=a.nodeY+a.nodeH/2,x2=b.nodeX,y2=b.nodeY+b.nodeH/2,bend=Math.max(48,(x2-x1)/2),active=source.status==='active'||target.status==='active',d=`M${x1} ${y1}C${x1+bend} ${y1} ${x2-bend} ${y2} ${x2} ${y2}`
   if(handoff){const c=agentColor(handoff.agent),mx=(x1+x2)/2,my=(y1+y2)/2-10
     return`<path class="edge handoff" d="${d}" style="stroke:${c}" marker-end="url(#arrow)"/><text x="${mx}" y="${my}" text-anchor="middle" fill="${c}" font-size="10.5" font-weight="650" font-family="var(--mono)">${esc(handoff.agent)} ⇢</text>`}
@@ -352,7 +360,7 @@ function graphLinkEdge(a,b,pos){const A=pos[a.id],B=pos[b.id];if(!A||!B)return''
   if(arguments[3]){const h=arguments[3],c=agentColor(h.agent)
     return`<path class="edge handoff" d="${d}" style="stroke:${c}"/><text x="${(x1+x2)/2}" y="${(y1+y2)/2-8}" text-anchor="middle" fill="${c}" font-size="10.5" font-weight="650" font-family="var(--mono)">${esc(h.agent)} ⇢</text>`}
   return`<path class="edge link" d="${d}"/>`}
-function graphNode(p,index,pos){return collapsedGraphNode(p,index,pos)+(!fileMode&&openGraphDetails.has(ns(p.id))?expandedGraphNode(p,pos):'')}
+function graphNode(p,index,pos){return collapsedGraphNode(p,index,pos)+(!fileMode&&isUnfolded(p)?expandedGraphNode(p,pos):'')}
 function graphTaskIsOpen(task){if(openGraphTasks.has(ns(task.id)))return true;if(closedGraphTasks.has(ns(task.id)))return false;return task.status==='active'}
 function graphTaskMarker(task,index){if(task.status==='done')return`<span class="task-capsule-badge" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span>`;if(task.status==='blocked')return`<span class="task-capsule-badge blocked" aria-hidden="true">!</span>`;return`<span class="task-capsule-marker" aria-hidden="true"><svg viewBox="0 0 24 24"><circle class="ring-track" cx="12" cy="12" r="11"/><circle class="ring-live" cx="12" cy="12" r="11"/></svg><span>${index+1}</span></span>`}
 function graphTaskDetails(task){const comp=M.plan.find(x=>x.id===task.parent),compActive=M.plan.some(x=>x.parent===task.parent&&x.status==='active')
@@ -439,7 +447,7 @@ function handoffLabel(p,w,h){
   const x=hs[hs.length-1]
   return`<text class="handoff-label" x="${w-16}" y="${h-12}" text-anchor="end"><tspan fill="${agentColor(x.from)}">${esc(x.from)}</tspan><tspan fill="var(--faint)"> ⇄ </tspan><tspan fill="${agentColor(x.to)}">${esc(x.to)}</tspan></text>`
 }
-function collapsedGraphNode(p,index,pos){const list=kids(p.id),done=list.filter(n=>n.status==='done').length,progress=pct(done,list.length),label=p.title.length>28?`${p.title.slice(0,27)}…`:p.title,isOpen=openGraphDetails.has(ns(p.id)),w=pos.nodeW,h=pos.nodeH,obsWord=p.status==='done'?'Revising':p.status==='blocked'?'Retrying':'Editing',chipN=new Set(M.plan.filter(n=>n.parent===p.id&&(n.status==='active'||n.status==='blocked')&&n.by).map(n=>n.by)).size;return`<g class="gnode ${p.status} ${p.kind==='knowledge'?'knowledge':''} ${isOpen?'selected':''}" data-id="${ns(p.id)}" transform="translate(${pos.nodeX} ${pos.nodeY})" role="button" tabindex="0" aria-expanded="${isOpen}" aria-label="${isOpen?'Hide':'Show'} tasks for ${esc(p.title)}" onclick="toggleGraphNode('${ns(p.id)}',event)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleGraphNode('${ns(p.id)}',event)}"><rect class="node-box" width="${w}" height="${h}" rx="12"/><circle class="port" cx="0" cy="${h/2}" r="4"/><circle class="port" cx="${w}" cy="${h/2}" r="4"/><text class="kicker" x="16" y="24">${esc((p.tech||'#'+p.id).slice(0,Math.min(42,Math.floor((w-170)/6.8))))}</text><text class="obs-label obs-file" x="${w-16}" y="76" text-anchor="end" fill="var(--accent)" font-size="11" font-family="var(--mono)"></text>${nodeStatusIcon(p,w)}<circle class="obs-ring" cx="${w-26}" cy="26" r="13" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-dasharray="23 59"/><text class="obs-label" x="${w-44-24*Math.min(chipN,3)}" y="30" text-anchor="end" fill="var(--accent)" font-size="11" font-weight="600" font-family="var(--font)">${obsWord}</text>${nodeAgentChips(p,w)}<text class="node-title" x="16" y="52">${esc(label)}</text><text class="node-meta" x="16" y="76">${done} of ${list.length} tasks · ${p.status==='pending'&&done>0?'Underway':statusLabel(p.status)}</text><rect class="progress-bg" x="16" y="92" width="${w-32}" height="4" rx="2"/><rect class="progress" x="16" y="92" width="${(w-32)*progress/100}" height="4" rx="2"/>${fileMode?fileConstellation(p,w):`<text class="node-action" x="16" y="116">${isOpen?'HIDE TASKS ↑':'SHOW TASKS ↓'}</text>`}${handoffLabel(p,w,h)}${list.some(k=>k.status==='pending'&&k.src==='agent')?`<text x="${w-16}" y="116" text-anchor="end" fill="#e08bb8" font-size="10" font-weight="700" font-family="var(--mono)" letter-spacing=".06em">SESSION PLAN</text>`:''}</g>`}
+function collapsedGraphNode(p,index,pos){const list=kids(p.id),done=list.filter(n=>n.status==='done').length,progress=pct(done,list.length),label=p.title.length>28?`${p.title.slice(0,27)}…`:p.title,isOpen=isUnfolded(p),w=pos.nodeW,h=pos.nodeH,obsWord=p.status==='done'?'Revising':p.status==='blocked'?'Retrying':'Editing',chipN=new Set(M.plan.filter(n=>n.parent===p.id&&(n.status==='active'||n.status==='blocked')&&n.by).map(n=>n.by)).size;return`<g class="gnode ${p.status} ${p.kind==='knowledge'?'knowledge':''} ${isOpen?'selected':''}" data-id="${ns(p.id)}" transform="translate(${pos.nodeX} ${pos.nodeY})" role="button" tabindex="0" aria-expanded="${isOpen}" aria-label="${isOpen?'Hide':'Show'} tasks for ${esc(p.title)}" onclick="toggleGraphNode('${ns(p.id)}',event)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleGraphNode('${ns(p.id)}',event)}"><rect class="node-box" width="${w}" height="${h}" rx="12"/><circle class="port" cx="0" cy="${h/2}" r="4"/><circle class="port" cx="${w}" cy="${h/2}" r="4"/><text class="kicker" x="16" y="24">${esc((p.tech||'#'+p.id).slice(0,Math.min(42,Math.floor((w-170)/6.8))))}</text><text class="obs-label obs-file" x="${w-16}" y="76" text-anchor="end" fill="var(--accent)" font-size="11" font-family="var(--mono)"></text>${nodeStatusIcon(p,w)}<circle class="obs-ring" cx="${w-26}" cy="26" r="13" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-dasharray="23 59"/><text class="obs-label" x="${w-44-24*Math.min(chipN,3)}" y="30" text-anchor="end" fill="var(--accent)" font-size="11" font-weight="600" font-family="var(--font)">${obsWord}</text>${nodeAgentChips(p,w)}<text class="node-title" x="16" y="52">${esc(label)}</text><text class="node-meta" x="16" y="76">${done} of ${list.length} tasks · ${p.status==='pending'&&done>0?'Underway':statusLabel(p.status)}</text><rect class="progress-bg" x="16" y="92" width="${w-32}" height="4" rx="2"/><rect class="progress" x="16" y="92" width="${(w-32)*progress/100}" height="4" rx="2"/>${fileMode?fileConstellation(p,w):`<text class="node-action" x="16" y="116">${isOpen?'HIDE TASKS ↑':'SHOW TASKS ↓'}</text>`}${handoffLabel(p,w,h)}${list.some(k=>k.status==='pending'&&k.src==='agent')?`<text x="${w-16}" y="116" text-anchor="end" fill="#e08bb8" font-size="10" font-weight="700" font-family="var(--mono)" letter-spacing=".06em">SESSION PLAN</text>`:''}</g>`}
 function expandedGraphNode(p,pos){
   const list=kids(p.id),detailY=pos.nodeY+pos.nodeH+24,centerX=pos.nodeX+pos.nodeW/2
   const sessRows=(M.runs||[]).filter(r=>r.componentId===p.id).flatMap(r=>(r.todos||[]).map((t,i)=>graphSessionRow(t,i,r.ended))).join('')
@@ -450,7 +458,15 @@ function expandedGraphNode(p,pos){
   const tasks=(list.length||sessRows||obsRow)?`<div class="task-capsules list" role="list" aria-label="${esc(p.title)} tasks">${list.map(graphTaskRow).join('')}${sessRows}${obsRow}</div>`:'<div class="graph-task-empty">No tasks in this phase.</div>'
   return`<path class="detail-tether" d="M${centerX} ${pos.nodeY+pos.nodeH}V${detailY}"/><g class="graph-detail" data-detail="${ns(p.id)}" transform="translate(${pos.x} ${detailY})"><foreignObject width="${pos.detailW}" height="${pos.detailH}"><div xmlns="http://www.w3.org/1999/xhtml" class="graph-task-card">${tasks}</div></foreignObject></g>`
 }
-function toggleGraphNode(id,event){event?.stopPropagation();openGraphDetails.has(id)?openGraphDetails.delete(id):openGraphDetails.add(id);renderGraph();renderTimes()}
+function toggleGraphNode(id,event){event?.stopPropagation()
+  const boards=boardsAll(),ci=id.indexOf(':'),b=boards.find(x=>String(x.port)===id.slice(0,ci))
+  const p=b&&b.plan.find(x=>x.id===id.slice(ci+1)&&x.level==='component')
+  const auto=p&&(p.status==='active'||(p.touchedAt&&Date.now()-p.touchedAt<60000)||((b.runs||[]).some(r=>!r.ended&&r.componentId===p.id)))
+  if(openGraphDetails.has(id)){openGraphDetails.delete(id);if(auto)closedGraphDetails.add(id)}
+  else if(closedGraphDetails.has(id)){closedGraphDetails.delete(id);openGraphDetails.add(id)}
+  else if(auto)closedGraphDetails.add(id)
+  else openGraphDetails.add(id)
+  renderGraph();renderTimes()}
 function toggleGraphTask(id,event){event?.stopPropagation();const ci=id.indexOf(':'),port=id.slice(0,ci),raw=id.slice(ci+1);const b=W.find(x=>String(x.port)===port)||M;const task=b&&b.plan.find(n=>n.id===raw&&n.level==='task');if(!task)return
   const save=BP;BP=port
   if(graphTaskIsOpen(task)){openGraphTasks.delete(id);closedGraphTasks.add(id)}else{closedGraphTasks.delete(id);openGraphTasks.add(id)}
@@ -506,7 +522,8 @@ function renderRuns(){
       <div class="run-head"><span class="run-agent"><svg viewBox="0 0 24 24"><path fill="${agentColor(r.agent)}" d="${icon||''}"/></svg></span><span class="run-name">${esc(r.agent)}</span><span style="color:var(--faint);font-size:11.5px">· ${esc(r.__project)}</span><span class="run-live-dot"></span><span class="run-elapsed"><span class="t-ago" data-at="${r.startedAt}"></span>${comp?` · in <a href="#" style="color:var(--accent);text-decoration:none" onclick="event.preventDefault();event.stopPropagation();focusComp('${r.__port}:${comp.id}')">${esc(comp.title)}</a>`:''}</span></div>
       ${cur?`<div class="run-task">${esc(cur.content)}</div>`:r.ended?`<div class="run-task" style="color:var(--dim)">Idle — waiting for you</div>`:''}
       ${toolLine}
-      <div class="run-detail">${todos}${hist?`<div style="margin-top:8px">${hist}</div>`:''}</div>
+      ${(r.subagents||[]).filter(s=>!s.ended).map(s=>`<div class="run-sub"><span class="run-sub-dot"></span><span class="run-sub-name">${esc(s.name)}</span><span class="run-sub-ago t-ago" data-at="${s.startedAt}"></span></div>`).join('')}
+      <div class="run-detail">${(r.subagents||[]).filter(s=>s.ended).map(s=>`<div class="run-sub ended"><span class="run-sub-tick">✓</span><span class="run-sub-name">${esc(s.name)}</span></div>`).join('')}${todos}${hist?`<div style="margin-top:8px">${hist}</div>`:''}</div>
     </div>`}).join('')).join('')
   let hint=''
   if(M){

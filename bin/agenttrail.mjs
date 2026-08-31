@@ -205,7 +205,7 @@ function runFor(id, cwd) {
 }
 function toolDetail(input = {}) {
   const p = input.file_path || input.notebook_path
-  const d = input.command || (p ? (relToRepo(p) ?? p) : '') || input.pattern || input.url || input.query || input.prompt || ''
+  const d = input.command || (p ? (relToRepo(p) ?? p) : '') || input.description || input.pattern || input.url || input.query || input.prompt || ''
   return String(d).replace(/\s+/g, ' ').slice(0, 90)
 }
 function relToRepo(p) {
@@ -226,6 +226,14 @@ function handleHookEvent(ev) {
   else if (kind === 'PreToolUse') {
     run.ended = false
     run.currentTool = { name: ev.tool_name, detail: toolDetail(ev.tool_input), at: Date.now() }
+    if (ev.tool_name === 'Task' && ev.tool_input) {
+      const name = String(ev.tool_input.description || ev.tool_input.subagent_type || 'sub-agent').slice(0, 60)
+      ;(run.subagents = run.subagents || []).push({ name, startedAt: Date.now(), ended: false })
+      if (run.subagents.length > 12) run.subagents.shift()
+    }
+  } else if (kind === 'SubagentStop') {
+    const sa = (run.subagents || []).find(x => !x.ended)
+    if (sa) { sa.ended = true; sa.endedAt = Date.now() }
   } else if (kind === 'PostToolUse') {
     run.ended = false
     const started = run.currentTool && run.currentTool.name === ev.tool_name ? run.currentTool.at : Date.now()
@@ -735,7 +743,7 @@ function installHooks() {
   const cmd = `node ${JSON.stringify(fileURLToPath(import.meta.url))} hook`
   cfg.hooks = cfg.hooks || {}
   let added = 0
-  for (const ev of ['PreToolUse', 'PostToolUse', 'Stop', 'SessionStart']) {
+  for (const ev of ['PreToolUse', 'PostToolUse', 'Stop', 'SessionStart', 'SubagentStop']) {
     const list = cfg.hooks[ev] = cfg.hooks[ev] || []
     const present = JSON.stringify(list).includes('agenttrail')
     if (!present) { list.push({ matcher: '*', hooks: [{ type: 'command', command: cmd }] }); added++ }
