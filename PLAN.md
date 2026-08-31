@@ -85,6 +85,9 @@ files: [public/**, assets/brand/**]
 - [x] Set up an unmapped repo from its card {#map-setup-button}
   tech: Set up the map button -> /setup-board relay -> sibling /setup runs init
   by: claude
+- [x] Cards with live work auto-unfold at any zoom {#map-live-unfold}
+  tech: isUnfolded/compLive in public/index.html; folds back ~60s after activity stops
+  by: claude
 ## Show the repo like an editor {#explorer}
 tech: vs-code-style file tree
 needs: [watcher]
@@ -126,6 +129,9 @@ files: [bin/**, public/**]
   by: claude
 - [x] Save ended cycles as durable history {#runs-cycle-history}
   tech: archiveRun + cycles[] persisted in bin/agenttrail.mjs; Past cycles rows in the dock
+  by: claude
+- [x] Sub-agents show as child rows on their parent's run card {#runs-subagents}
+  tech: Task/SubagentStop hooks -> run.subagents in bin/agenttrail.mjs; .run-sub rows
   by: claude
 ## See the whole fleet {#fleet}
 tech: /summary + /fleet aggregation; zoom-out altitude with live repo cards
