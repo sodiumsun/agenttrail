@@ -217,6 +217,7 @@ function handleHookEvent(ev) {
   const cwd = ev.cwd || ''
   if (!(cwd === repo || cwd.startsWith(repo + path.sep))) return false
   const run = runFor(ev.session_id || 'session', cwd)
+  if (ev.agent) run.agent = String(ev.agent).slice(0, 24).toLowerCase()
   run.lastEventAt = Date.now()
   stateDirty = true
   const kind = ev.hook_event_name
