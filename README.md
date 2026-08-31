@@ -120,6 +120,7 @@ links: [notify]
 - `[~]` means working, `[x]` means done, and `[!]` means stuck
 - `needs:` draws dependency arrows; `links:` draws dashed connections
 - `by:` records who did the work; `from:` separates agent intent from roadmap intent
+- `kind: knowledge` renders a component as a purple knowledge organ; `kind: human` renders it dashed in its own color — the step where a person enters the loop; `url:` makes the card clickable, opening the artifact it produces
 - Backfilled completed tasks cite their implementing file as evidence
 - Agents record plan-affecting decisions before they act on them
 
