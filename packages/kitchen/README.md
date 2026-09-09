@@ -6,10 +6,10 @@ Native todos become order tickets, project responsibilities become chefs, and co
 
 ## Try the preview
 
-Requires Node.js 20 or newer and a browser with WebGL. Download the `.tgz` package from the [Kitchen preview release](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.1), then run:
+Requires Node.js 20 or newer and a browser with WebGL. From the repo you want to watch, run the prebuilt [Kitchen preview release](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.1):
 
 ```sh
-npm exec --package=/path/to/agenttrail-kitchen-0.1.0-alpha.1.tgz -- agenttrail-kitchen /path/to/your/repo
+npm exec --yes --package=https://github.com/sodiumsun/agenttrail/releases/download/kitchen-v0.1.0-alpha.1/agenttrail-kitchen-0.1.0-alpha.1.tgz -- agenttrail-kitchen .
 ```
 
 The published archive includes the graphics bundle and local fonts. It has no runtime npm dependencies and needs no graphics build. The short npm registry command is not available until this package is published there.

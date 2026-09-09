@@ -16,10 +16,10 @@ npm run build --prefix packages/kitchen
 npm start --prefix packages/kitchen -- --project /absolute/path/to/your/repo
 ```
 
-Or install the prebuilt archive from the [experimental release](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.1):
+Or, from your working repo, run the prebuilt archive from the [experimental release](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.1):
 
 ```sh
-npm exec --package=/path/to/agenttrail-kitchen-0.1.0-alpha.1.tgz -- agenttrail-kitchen /path/to/your/repo
+npm exec --yes --package=https://github.com/sodiumsun/agenttrail/releases/download/kitchen-v0.1.0-alpha.1/agenttrail-kitchen-0.1.0-alpha.1.tgz -- agenttrail-kitchen .
 ```
 
 The browser opens at localhost:4780 or the next available port. Choose **Open repo** to switch folders. You can watch up to 12 roots without restarting agents. No PLAN.md is required; available native activity supplies the view. The source map command, `npx agenttrail`, keeps its existing behavior and installation footprint.

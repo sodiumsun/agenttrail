@@ -19,7 +19,7 @@ The existing map daemon, interface and package metadata are unchanged. The root 
 - All 71 kitchen tests pass, including native task receipts, role/session identity, shared orders, explicit handoffs, path isolation and connector setup.
 - The archive installs offline into a fresh folder with no lifecycle scripts or development dependencies. Its installed launcher attaches a folder containing spaces and shell metacharacters correctly, serves its bundled assets and opens the labeled example URL.
 - Browser verification from the isolated installed archive shows the 3D scene, a Researcher → Writer contribution on the same dish, and completion moving that dish to the deliverable collection. The scene correctly reports five roles and one example session.
-- CI checks Node 20, 22 and 24 on Linux. See the release's associated commit checks for their results.
+- The 71 tests and clean-package check also pass in CI on Linux with Node 20, 22 and 24. See the release's associated commit checks for their results.
 
 Earlier native Codex/Claude collaboration was recorded before this import. Native Cursor validation and Windows-specific browser/CLI validation remain pending. No broader support claim is implied by the example mode.
 
