@@ -21,13 +21,14 @@ The existing map daemon, interface and package metadata are unchanged. The root 
 - All 71 kitchen tests pass, including native task receipts, role/session identity, shared orders, explicit handoffs, path isolation and connector setup.
 - The archive installs offline into a fresh folder with no lifecycle scripts or development dependencies. Its installed launcher attaches a folder containing spaces and shell metacharacters correctly, serves its bundled assets and opens the labeled example URL.
 - Browser verification from the isolated installed archive shows the 3D scene, a Researcher → Writer contribution on the same dish, and completion moving that dish to the deliverable collection. The scene correctly reports five roles and one example session.
+- The exact public GitHub-download command was exercised after publication: help prints correctly and a new isolated kitchen starts successfully in Example mode.
 - The 71 tests and clean-package check also pass in CI on Linux with Node 20, 22 and 24. See the release's associated commit checks for their results.
 
 Earlier native Codex/Claude collaboration was recorded before this import. Native Cursor validation and Windows-specific browser/CLI validation remain pending. No broader support claim is implied by the example mode.
 
 ## Distribution
 
-The first preview uses a [GitHub prerelease](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.2) with an installable `agenttrail-kitchen-0.1.0-alpha.2.tgz`. npm authentication is currently unavailable, so the registry package and short `npx agenttrail-kitchen` command are not yet published.
+The [GitHub prerelease is published](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.2) with an installable `agenttrail-kitchen-0.1.0-alpha.2.tgz` and SHA-256 checksum. Source integration is merged through PRs #8 and #9. npm authentication is currently unavailable, so the registry package and short `npx agenttrail-kitchen` command are not yet published.
 
 The archive has no runtime npm dependencies. Its built browser bundle includes Three.js; fonts retain their OFL license. It excludes tests, development scripts, original source scene modules, native transcripts, personal configuration, raw recordings, music and reference screenshots. Complete editable source and tests remain in the repository.
 

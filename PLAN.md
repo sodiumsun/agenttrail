@@ -188,9 +188,18 @@ files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/
 - [x] Explain how to try and contribute to the kitchen {#ship-kitchen-guide}
   by: codex
   from: agent
-- [~] Publish a runnable experimental kitchen preview {#ship-kitchen-preview}
+- [x] Publish a runnable experimental kitchen preview {#ship-kitchen-preview}
   by: codex
   from: agent
+  tech: merged via PRs #8 and #9; kitchen-v0.1.0-alpha.2 includes a prebuilt archive and checksum. Public npm exec download, help and cold startup verified.
+- [!] Publish the short kitchen command to npm {#ship-kitchen-registry}
+  by: codex
+  from: agent
+  tech: npm whoami returns Unauthorized; GitHub archive installation works without registry publication.
+- [x] Show cooking and deliveries through a closer video camera {#ship-kitchen-camera}
+  by: codex
+  from: agent
+  tech: video sub-agent reframed original high-resolution footage into a 26.7-second edit with eased zooms, plate-transfer pans and conveyor tracking; music and silent exports remain local.
 - [x] Propose how to release the kitchen inside Agenttrail {#ship-kitchen-structure}
   by: codex
   from: agent
