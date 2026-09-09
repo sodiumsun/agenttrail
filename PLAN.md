@@ -201,10 +201,10 @@ files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/
   by: codex
   from: agent
   tech: reproduced four issues using real source modules and an isolated Map server; captured a local review with repro steps and suggested fixes. All 71 existing Kitchen tests pass. README and docs/OBSERVABILITY.md explain Map/Kitchen data sources, roles versus sessions, independent services, setup changes and different privacy policies; fixes remain open under runs and kitchen.
-- [~] Publish the clarified observability guide {#ship-observability-guide}
+- [x] Publish the clarified observability guide {#ship-observability-guide}
   by: codex
   from: agent
-  tech: verify documentation links and merge the overview, accurate provider coverage and setup guidance into the public repository.
+  tech: PR #12 merged the overview, comparison, source diagram and accurate setup/provider guidance. Verified 38 documentation links and the public main README/guide. All Kitchen CI checks passed on Linux Node 20/22/24 and macOS Node 22. GitHub About now describes the two observability views; runtime findings remain open.
 - [x] Show Kitchen clearly and document the verified setup {#ship-kitchen-readiness-docs}
   by: codex
   from: agent
