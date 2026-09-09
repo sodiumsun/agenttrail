@@ -2,7 +2,9 @@
 
 [![Agenttrail Kitchen overview](https://raw.githubusercontent.com/sodiumsun/agenttrail/main/docs/kitchen/overview.jpg)](https://github.com/sodiumsun/agenttrail/tree/main/docs/kitchen)
 
-Your coding agents, cooking together. An experimental 3D view in [Agenttrail](https://github.com/sodiumsun/agenttrail), a local, open-source monitor for coding agents.
+Your coding agents, cooking together. Kitchen is the experimental 3D observability view in [Agenttrail](https://github.com/sodiumsun/agenttrail), a local, open-source project for following AI coding agents' work. It observes available activity from agents running in their existing tools and visualizes their contributions as a shared cooking scene.
+
+Agenttrail has two views: **Map** for project components, dependencies and file activity (`npx agenttrail`), and **Kitchen** for native tasks and role contributions (`npx agenttrail-kitchen .`). Each runs independently with its own local service and provider adapters. [Compare the views and their data sources](https://github.com/sodiumsun/agenttrail/blob/main/docs/OBSERVABILITY.md).
 
 Native todos become order tickets, project responsibilities become chefs, and completed todos travel to the deliverable table. Several chefs can contribute to one dish. A chef is a role, so one actual session can work through several chefs; the interface keeps session counts separate. Confirmed artifact receipts can animate plates moving between contributors.
 

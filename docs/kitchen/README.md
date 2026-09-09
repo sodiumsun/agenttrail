@@ -1,6 +1,8 @@
 # Agenttrail Kitchen
 
-Watch coding agents work through a shared 3D kitchen. Agenttrail's map shows project structure; Kitchen shows the current work as chefs, order tickets, ingredients and deliveries. Both belong to the same open-source project. Kitchen is an experimental, independently installed package.
+Kitchen is the experimental 3D observability view in **Agenttrail**, an open-source project for following AI coding agents' work. It turns available native tasks and observed activity into chefs, order tickets, ingredients and deliveries. Your agents keep working in their existing tools; the kitchen visualizes their work.
+
+The other view, **Agenttrail Map**, shows project components, dependencies and file activity. Both live in this repository and run independently as local browser companions. They currently use separate services and provider adapters. Kitchen can read a running Map's context, but their activity coverage and histories differ. [Compare the two views](../../README.md#one-project-two-views) · [How observability works](../OBSERVABILITY.md)
 
 ![Full kitchen with chefs contributing to a shared task in a recorded Codex and Claude collaboration](overview.jpg)
 

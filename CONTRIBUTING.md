@@ -1,6 +1,6 @@
 # Contributing to Agenttrail
 
-Agenttrail has a lightweight project map and an experimental 3D kitchen. Both use the same repository and issue tracker. The map's existing command remains independent of the kitchen's graphics dependencies.
+Agenttrail provides local observability for AI coding agents through two views: **Map**, a lightweight project map, and **Kitchen**, an experimental 3D view of current tasks and role contributions. Both use the same repository and issue tracker. They observe agents running in their existing tools; they do not orchestrate those agents. [Product and data model](docs/OBSERVABILITY.md)
 
 ## Find the relevant code
 

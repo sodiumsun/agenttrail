@@ -111,6 +111,10 @@ tech: claude code hooks adapter — PostToolUse/TodoWrite → POST /events
 needs: [plan-reader]
 links: [map]
 files: [bin/**, public/**]
+- [ ] Restrict Map actions to trusted local requests {#runs-request-boundary}
+  tech: repository review reproduced missing Host/Origin validation and mutation authentication; add coverage for UI actions, hooks and cross-board relays.
+- [ ] Keep Map and Kitchen hook setup independent {#runs-distinct-hooks}
+  tech: Map's substring detection mistakes Kitchen's relay for its own; verify both installation orders and preserve unrelated hooks.
 - [x] Receive hook events and track sessions {#runs-endpoint}
   by: claude
   tech: /events endpoint; per-session todos, current tool, recent calls
@@ -168,6 +172,10 @@ files: [bin/**, public/**]
 tech: optional kitchen package, local observers, workflow model and Three.js renderer
 files: [packages/kitchen/**]
 links: [plan-reader, runs, map]
+- [ ] Preserve native todos when Map reports newer activity {#kitchen-native-plan-precedence}
+  tech: Projects.enrich currently lets a newer general Map event replace a confirmed native task list with empty board todos and withdraw its dishes.
+- [ ] Confirm plan updates before serving completed dishes {#kitchen-plan-acknowledgements}
+  tech: wait for successful Codex update_plan and legacy TodoWrite results; failed or interrupted calls must retain the last confirmed plan.
 - [x] Bring the runnable kitchen into this repository {#kitchen-import}
   by: codex
   from: agent
@@ -189,6 +197,14 @@ links: [plan-reader, runs, map]
 ## Ship to GitHub and npm {#ship}
 needs: [map, explorer]
 files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/**]
+- [x] Review reliability and explain the two observability views {#ship-observability-review}
+  by: codex
+  from: agent
+  tech: reproduced four issues using real source modules and an isolated Map server; captured a local review with repro steps and suggested fixes. All 71 existing Kitchen tests pass. README and docs/OBSERVABILITY.md explain Map/Kitchen data sources, roles versus sessions, independent services, setup changes and different privacy policies; fixes remain open under runs and kitchen.
+- [~] Publish the clarified observability guide {#ship-observability-guide}
+  by: codex
+  from: agent
+  tech: verify documentation links and merge the overview, accurate provider coverage and setup guidance into the public repository.
 - [x] Show Kitchen clearly and document the verified setup {#ship-kitchen-readiness-docs}
   by: codex
   from: agent
@@ -257,6 +273,7 @@ files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/
   tech: README definition, sentence-case headings, npm metadata, GitHub description and topics
 
 ## decisions
+- 2026-09-09: Review the public repository for concrete reliability and setup issues, recording reproducible findings separately from planned features. Describe Agenttrail as the local observability project with two views: Agenttrail Map for project structure and activity, and Agenttrail Kitchen for native tasks and role contributions. Document their current independent services and differing provider support rather than implying a unified event backend or agent orchestration.
 - 2026-09-08: Publish Kitchen to npm now that the owner has restored registry login. Use alpha.3 for the refreshed package README instead of changing the existing alpha.2 archive; keep the experimental version explicit and use the latest tag so npx agenttrail-kitchen . works. Verify the exact public package from a fresh consumer environment, then publish matching GitHub release assets and setup instructions. The owner chose browser setup first; no editor extension is being added.
 - 2026-09-08: Audit the downloadable public Kitchen release from an isolated consumer install, verify real repo observation and adapter behavior, fix launch gaps, and refresh the root README with Kitchen screenshots and exact install/support instructions. No editor extension currently exists; clarify whether the owner wants one built or wants the working browser setup documented. Keep unknown integration status explicit.
 - 2026-09-08: The public archive check exposed a symlink entry-point bug: invoking the underlying file worked, but npm's installed command exited without calling main. Fix the entry-point detection and test actual npm exec. Supersede the first preview with alpha.2 rather than silently replacing the published archive.

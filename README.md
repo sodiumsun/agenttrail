@@ -7,7 +7,7 @@
 
 # agenttrail
 
-**See what your coding agents are doing—in a live project map or a shared 3D kitchen.**
+**Local observability for AI coding agents.**
 
 [![Kitchen on npm](https://img.shields.io/npm/v/agenttrail-kitchen?color=e9a23b&label=kitchen%20on%20npm)](https://www.npmjs.com/package/agenttrail-kitchen)
 [![Map on npm](https://img.shields.io/npm/v/agenttrail?color=e9a23b&label=map%20on%20npm)](https://www.npmjs.com/package/agenttrail)
@@ -16,7 +16,25 @@
 
 </div>
 
-Agenttrail is a local, open-source monitor for AI coding agents. **Agenttrail Kitchen** turns their current work into chefs, shared dishes and deliveries. **Agenttrail Map** shows the durable plan, file activity and dependencies. Both live in this repository; each has its own command.
+Agenttrail watches your coding agents' available activity and turns it into a live view of their work. See which part of a project is changing, what tasks an agent has reported, and where it needs your attention—without piecing together several terminal windows.
+
+Your agents keep running in tools such as Codex and Claude Code. Agenttrail observes local files, plans and supported agent events; it visualizes that evidence for you. It does not run the agents, assign their work or decide that a task is finished.
+
+## One project, two views
+
+**Agenttrail** is the open-source project. **Map** and **Kitchen** are its two views:
+
+| | Agenttrail Map | Agenttrail Kitchen |
+| --- | --- | --- |
+| Helps you follow | Project structure, progress and which components are changing | Current tasks, role contributions and completed work |
+| Visualizes work as | Components, dependencies, file activity and session trails | Chefs, order tickets, cooking and deliveries |
+| Main sources | `PLAN.md`, file changes and optional Claude Code hooks | Available native todos, local Codex/Claude activity and optional Claude/Cursor hooks |
+| Start in your repo | `npx agenttrail` | `npx agenttrail-kitchen .` |
+| Plan needed? | Optional for file activity; needed for the component map | Optional; native todos supply order tickets when available |
+
+Choose Map for the project overview and Kitchen to follow the work as a shared cooking scene. Each runs independently in your browser. They currently have separate local services and provider adapters; Kitchen can also read a running Map's context. Their activity coverage and history are not identical. [How observability works](docs/OBSERVABILITY.md)
+
+## Agenttrail Kitchen
 
 [![Agenttrail Kitchen overview: six project responsibilities working together, with shared dishes and a delivery conveyor](docs/kitchen/overview.jpg)](docs/kitchen/README.md)
 
@@ -80,9 +98,9 @@ npx agenttrail
 
 ![Agenttrail Map showing live sessions, component progress and file changes](docs/demo.gif)
 
-The Map combines declared intent in `PLAN.md` with observed file changes. A completed component lights up when its files change again. Current Claude Code runs and their todos appear through optional local hooks. Codex, Cursor and other tools contribute through file observation and the shared plan convention.
+The Map combines declared intent in `PLAN.md` with observed file changes. A completed component lights up when its files change again. Claude Code hooks add session and tool activity plus legacy `TodoWrite` lists. Map does not yet parse Claude's newer `TaskCreate`/`TaskUpdate` lists. Codex, Cursor and other tools contribute through file observation and the shared plan convention; their native session adapters currently belong to Kitchen.
 
-For the full component map, run `npx agenttrail init`, review the setup, then give your agent the backfill prompt from the board. It adds the convention to `CLAUDE.md` and `AGENTS.md`, creates a starter plan, and installs additive local Claude Code hooks. **Setup writes these files; normal watching does not.**
+For the full component map, run `npx agenttrail init`, review the setup, then give your agent the backfill prompt from the board. It adds the convention to `CLAUDE.md` and `AGENTS.md`, creates a starter plan, offers local Claude Code hooks, and adds `.agenttrail/` to `.gitignore`. **Setup writes these files; normal watching does not.** In an interactive terminal, starting Map without a plan also offers this setup. Noninteractive `init` assumes yes, so run it only when you intend to configure the repo.
 
 The map has a live file tree, dependency links, session trails and an overview of multiple repos. `npx agenttrail up` relaunches saved boards after a reboot; `npx agenttrail autostart` configures startup at login.
 
@@ -135,11 +153,15 @@ Rebuild after frontend changes. The source, tests, original scene assets and thi
 
 ## Local by construction
 
-Both services bind to **127.0.0.1**. No account, telemetry, transcript upload, model calls or cloud service is required. Fonts and graphics are bundled locally. Kitchen reads bounded local metadata and sends only allowlisted activity fields to its browser; task titles and project paths can still be visible on screen.
+Both services bind to **127.0.0.1**. No account, telemetry, transcript upload, model calls or cloud service is required. Fonts and graphics are available locally. Kitchen reads bounded local metadata and sends only allowlisted activity fields to its browser. Map's Claude hook view can display shortened command text, search terms and other tool details, and saves recent activity under `~/.agenttrail`. Review visible task titles, paths and tool details before sharing a recording. [Data sources and local storage](docs/OBSERVABILITY.md#what-stays-on-your-machine)
 
 The Map is a dependency-free Node daemon and a static page. Kitchen is a separate package with a bundled Three.js frontend. Neither controls your agents, sends prompts, approves actions or marks their tasks complete.
 
 ## FAQ
+
+**Is Agenttrail an agent framework?** It is an observability tool. You run agents in their existing tools; Agenttrail visualizes available evidence of what they are doing. It does not coordinate execution or send prompts. The focus is task and project activity; token billing and full model traces are not implemented.
+
+**Are Map and Kitchen separate projects?** They are two views in this repository, with separate installable packages and local services. You can use either on its own. Kitchen is the experimental 3D view; the original `agenttrail` command opens Map.
 
 **Will this work in an existing repo?** Yes, run the Kitchen command from its folder. Git and `PLAN.md` are optional. A live coding session needs accessible local Codex/Claude logs or configured Cursor hooks. If no activity is available, the chefs wait; use Example to explore the interface.
 
