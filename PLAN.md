@@ -204,10 +204,10 @@ files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/
   by: codex
   from: agent
   tech: agenttrail-kitchen@0.1.0-alpha.3 is public under latest. Downloaded it without credentials and matched its integrity and bytes to the tested archive. A fresh-cache npx launch opens a live repo and serves bundled assets without writing to the repo. All 71 tests pass; the public archive passes the installed-package/live-event check.
-- [~] Publish the npm setup and matching release archive {#ship-kitchen-npm-guide}
+- [x] Publish the npm setup and matching release archive {#ship-kitchen-npm-guide}
   by: codex
   from: agent
-  tech: replace archive-only setup with the verified npx command, retain browser/editor limits, and publish the identical alpha.3 archive with its checksum on GitHub.
+  tech: PR #11 merged the short command, npm badge, pinned preview instructions and browser/editor limits. All 71 tests and package checks passed on Linux Node 20/22/24 and macOS Node 22. Published kitchen-v0.1.0-alpha.3 with the identical npm archive and SHA-256 checksum, verified its unauthenticated download and the public main README, and linked the new npm release from the older release notes.
 - [x] Show cooking and deliveries through a closer video camera {#ship-kitchen-camera}
   by: codex
   from: agent
