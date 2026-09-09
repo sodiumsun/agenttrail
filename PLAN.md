@@ -164,9 +164,37 @@ files: [bin/**, public/**]
   by: claude
   tech: overview+detail per the research — status-colored nodes, click to jump
 
+## Show agents cooking together {#kitchen}
+tech: optional kitchen package, local observers, workflow model and Three.js renderer
+files: [packages/kitchen/**]
+links: [plan-reader, runs, map]
+- [x] Bring the runnable kitchen into this repository {#kitchen-import}
+  by: codex
+  from: agent
+- [x] Make the preview install without a graphics build {#kitchen-package}
+  by: codex
+  from: agent
+- [x] Verify the packaged kitchen in a clean folder {#kitchen-package-check}
+  by: codex
+  from: agent
+
 ## Ship to GitHub and npm {#ship}
 needs: [map, explorer]
-files: [README.md, docs/**, package.json]
+files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/**]
+- [x] Explain how to try and contribute to the kitchen {#ship-kitchen-guide}
+  by: codex
+  from: agent
+- [~] Publish a runnable experimental kitchen preview {#ship-kitchen-preview}
+  by: codex
+  from: agent
+- [x] Propose how to release the kitchen inside Agenttrail {#ship-kitchen-structure}
+  by: codex
+  from: agent
+  tech: package boundaries, shared event model, public preview and announcement in docs/KITCHEN-RELEASE-PLAN.md
+- [x] Plan the companion virtual agent office {#ship-office-plan}
+  by: codex
+  from: agent
+  tech: Research and visual alternatives in ../agent-office; planning only, no runtime changes
 - [x] Public repo and readme {#ship-repo}
   tech: github.com/sodiumsun/agenttrail + README.md
 - [x] Fresh demo gif of the current look {#ship-gif}
@@ -204,6 +232,9 @@ files: [README.md, docs/**, package.json]
   tech: README definition, sentence-case headings, npm metadata, GitHub description and topics
 
 ## decisions
+- 2026-09-08: The owner approved bringing Kitchen into Agenttrail and releasing an experimental preview. Add the kitchen component because the working scene, observers and packaging own packages/kitchen/** and the release now depends on them. Keep the existing map package unchanged; share more runtime code in subsequent work. Import runtime assets, tests and relevant docs, excluding personal logs, reference screenshots and music. A separate video-editing sub-agent is preparing smooth camera moves from the real footage.
+- 2026-09-08: Prepare a release-structure recommendation for bringing the built kitchen into Agenttrail. The proposal keeps one repository and an optional kitchen package; package migration and publication are not part of this planning change.
+- 2026-09-08: Explore a visually distinct virtual office in sibling ../agent-office. This session produces research, proposed architecture, must-build scope, and comparable visual concepts only. Keep proposed future components in the companion brief until implementation makes them real; do not add speculative components to the existing map.
 - 2026-08-30: cycles + kind: knowledge + card-setup graduated into the plan after the board flagged PLAN BEHIND — the observed layer caught an undeclared build burst
 - 2026-08-21: spine is the codebase (fs watcher + PLAN.md), not agent hooks; hooks become an optional fidelity adapter
 - 2026-08-21: serve index.html fresh per request (no startup cache) so UI edits land without daemon restart

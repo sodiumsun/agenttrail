@@ -3,3 +3,8 @@ node_modules/
 .DS_Store
 .claude/settings.local.json
 promo-gifs/
+packages/kitchen/public/build/
+*.tgz
+recordings/
+.runs/
+.office/
