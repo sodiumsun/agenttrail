@@ -9,7 +9,7 @@
 
 **See what your coding agents are doing—in a live project map or a shared 3D kitchen.**
 
-[![Kitchen preview](https://img.shields.io/badge/Kitchen-public_preview-e9a23b)](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.2)
+[![Kitchen on npm](https://img.shields.io/npm/v/agenttrail-kitchen?color=e9a23b&label=kitchen%20on%20npm)](https://www.npmjs.com/package/agenttrail-kitchen)
 [![Map on npm](https://img.shields.io/npm/v/agenttrail?color=e9a23b&label=map%20on%20npm)](https://www.npmjs.com/package/agenttrail)
 [![Kitchen checks](https://github.com/sodiumsun/agenttrail/actions/workflows/kitchen.yml/badge.svg)](https://github.com/sodiumsun/agenttrail/actions/workflows/kitchen.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -27,14 +27,14 @@ Agenttrail is a local, open-source monitor for AI coding agents. **Agenttrail Ki
 You need **Node.js 20+**, a browser with WebGL, and a local project folder. Run this in the repo you want to watch:
 
 ```bash
-npm exec --yes --package=https://github.com/sodiumsun/agenttrail/releases/download/kitchen-v0.1.0-alpha.2/agenttrail-kitchen-0.1.0-alpha.2.tgz -- agenttrail-kitchen .
+npx agenttrail-kitchen .
 ```
 
 The browser opens at **localhost:4780** (or the next free port). Keep this terminal open and keep working in your coding agent. Codex and Claude Code activity is discovered from available local logs. No `PLAN.md`, Agenttrail Map installation, copied files, API key or new agent session is required for basic observation. The watcher does not launch agents or edit your repo.
 
 **Want to see it before connecting an agent?** Add `--example` to the command, then click **Next example step**. This is a labeled, scripted example. Click **Live** to return to your real repo.
 
-**This is a public experimental preview.** The downloadable archive includes the graphics and fonts, so users do not need a build step. `npx agenttrail-kitchen` is not published to npm yet; use the exact command above. `npx agenttrail` opens the Map, not Kitchen.
+**This is a public experimental preview.** The npm package includes the graphics and fonts, so users do not need a build step. To pin this release, use `npx agenttrail-kitchen@0.1.0-alpha.3 .`. The separate `npx agenttrail` command opens the Map.
 
 [Kitchen guide](docs/kitchen/README.md) · [Connect agents and troubleshoot](docs/kitchen/CONNECTING.md) · [Release and verification](docs/kitchen/RELEASE.md)
 
@@ -155,7 +155,7 @@ The Map is a dependency-free Node daemon and a static page. Kitchen is a separat
 
 **What changes in my repo?** Opening Kitchen does not change it. Optional hook installation edits only the reviewed provider settings. Optional `.office/kitchen.json` defines your workflow. Map `init` is a separate setup operation that creates the plan and agent conventions.
 
-**What is still experimental?** Local provider log formats can change. Cursor's native live behavior and Windows remain unverified. Shared artifact receipts need explicit integration, and order history is reconstructed from available observations after restarting. Kitchen's short npm command and editor extension are not published.
+**What is still experimental?** Local provider log formats can change. Cursor's native live behavior and Windows remain unverified. Shared artifact receipts need explicit integration, and order history is reconstructed from available observations after restarting. No editor extension has been released yet.
 
 ## Contribute and license
 

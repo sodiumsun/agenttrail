@@ -8,19 +8,13 @@ Watch coding agents work through a shared 3D kitchen. Agenttrail's map shows pro
 
 Requires Node.js 20 or newer and a WebGL browser.
 
-From a checkout of Agenttrail:
+From your working repo:
 
 ```sh
-npm ci --prefix packages/kitchen
-npm run build --prefix packages/kitchen
-npm start --prefix packages/kitchen -- --project /absolute/path/to/your/repo
+npx agenttrail-kitchen .
 ```
 
-Or, from your working repo, run the prebuilt archive from the [experimental release](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.2):
-
-```sh
-npm exec --yes --package=https://github.com/sodiumsun/agenttrail/releases/download/kitchen-v0.1.0-alpha.2/agenttrail-kitchen-0.1.0-alpha.2.tgz -- agenttrail-kitchen .
-```
+The [npm package](https://www.npmjs.com/package/agenttrail-kitchen) includes prebuilt graphics and local fonts. No build step is required. To pin this experimental release, use `npx agenttrail-kitchen@0.1.0-alpha.3 .`. Contributors can [build from source](../../README.md#build-kitchen-from-source).
 
 The browser opens at localhost:4780 or the next available port. Choose **Open repo** to switch folders. You can watch up to 12 roots without restarting agents. No PLAN.md is required; available native activity supplies the view. The source map command, `npx agenttrail`, keeps its existing behavior and installation footprint.
 
