@@ -32,7 +32,7 @@ agenttrail/
   CONTRIBUTING.md
 ```
 
-The package is `agenttrail-kitchen@0.1.0-alpha.1`. The preview is distributed as a prebuilt GitHub release archive because npm registry authentication is currently unavailable. The short `npx agenttrail-kitchen` command must not be advertised as available until registry publication succeeds. The archive includes built graphics and local fonts, has an explicit file allowlist and has no runtime npm dependencies. The existing `npx agenttrail` package and command remain unchanged.
+The package is `agenttrail-kitchen@0.1.0-alpha.2`. The preview is distributed as a prebuilt GitHub release archive because npm registry authentication is currently unavailable. The short `npx agenttrail-kitchen` command must not be advertised as available until registry publication succeeds. The archive includes built graphics and local fonts, has an explicit file allowlist and has no runtime npm dependencies. The existing `npx agenttrail` package and command remain unchanged.
 
 After the optional package works, offer a convenient `agenttrail kitchen` launcher and Map/Kitchen navigation that preserve the selected repo. That launcher is a later interface change, not an existing command.
 

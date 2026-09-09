@@ -39,7 +39,7 @@ That's it. No account, no global install, no telemetry. agenttrail opens on loca
 
 ![Real coding-agent responsibilities working on a shared dish in Agenttrail Kitchen](docs/kitchen/preview.png)
 
-Kitchen is an optional package. The existing map command stays lightweight and independent. [Try the prebuilt preview](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.1), or run from this repository:
+Kitchen is an optional package. The existing map command stays lightweight and independent. [Try the prebuilt preview](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.2), or run from this repository:
 
 ```bash
 npm ci --prefix packages/kitchen

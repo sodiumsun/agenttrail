@@ -6,10 +6,10 @@ Native todos become order tickets, project responsibilities become chefs, and co
 
 ## Try the preview
 
-Requires Node.js 20 or newer and a browser with WebGL. From the repo you want to watch, run the prebuilt [Kitchen preview release](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.1):
+Requires Node.js 20 or newer and a browser with WebGL. From the repo you want to watch, run the prebuilt [Kitchen preview release](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.2):
 
 ```sh
-npm exec --yes --package=https://github.com/sodiumsun/agenttrail/releases/download/kitchen-v0.1.0-alpha.1/agenttrail-kitchen-0.1.0-alpha.1.tgz -- agenttrail-kitchen .
+npm exec --yes --package=https://github.com/sodiumsun/agenttrail/releases/download/kitchen-v0.1.0-alpha.2/agenttrail-kitchen-0.1.0-alpha.2.tgz -- agenttrail-kitchen .
 ```
 
 The published archive includes the graphics bundle and local fonts. It has no runtime npm dependencies and needs no graphics build. The short npm registry command is not available until this package is published there.
@@ -47,7 +47,7 @@ cd packages/kitchen
 npm run check
 npm test
 npm pack
-node scripts/check-package.mjs ./agenttrail-kitchen-0.1.0-alpha.1.tgz
+node scripts/check-package.mjs ./agenttrail-kitchen-0.1.0-alpha.2.tgz
 ```
 
 The package smoke check installs into an isolated temporary folder without lifecycle scripts or development dependencies, launches the installed command, verifies bundled assets and checks repo attachment. It does not use your real agent logs or saved kitchen state.

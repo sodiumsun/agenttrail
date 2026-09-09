@@ -39,5 +39,5 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm pack
-      - run: node scripts/check-package.mjs ./agenttrail-kitchen-0.1.0-alpha.1.tgz
+      - run: node scripts/check-package.mjs ./agenttrail-kitchen-0.1.0-alpha.2.tgz
       - run: node --check ../../bin/agenttrail.mjs

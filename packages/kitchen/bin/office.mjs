@@ -53,4 +53,4 @@ export async function main(args=process.argv.slice(2)){
   console.log(`Agenttrail Kitchen is ready: ${url}\nWatching ${unique.map(p=>path.basename(p)).join(', ')}. Local metadata only.\nCodex and Claude observations are automatic when available. Use Connect agents for provider hooks.`);if(open)openBrowser(url);
   for(const signal of ['SIGINT','SIGTERM'])process.once(signal,async()=>{await office.close();process.exit(0);});
 }
-if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch(error=>{console.error(error.message);process.exitCode=1;});
+if(process.argv[1]&&await fs.realpath(process.argv[1]).catch(()=>null)===fileURLToPath(import.meta.url))main().catch(error=>{console.error(error.message);process.exitCode=1;});
