@@ -189,9 +189,10 @@ links: [plan-reader, runs, map]
 ## Ship to GitHub and npm {#ship}
 needs: [map, explorer]
 files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/**]
-- [~] Show Kitchen clearly and document the verified setup {#ship-kitchen-readiness-docs}
+- [x] Show Kitchen clearly and document the verified setup {#ship-kitchen-readiness-docs}
   by: codex
   from: agent
+  tech: merged PR #10 with a Kitchen-first README, public overview and cooking GIF, exact archive install command, browser/editor instructions and troubleshooting. Verified the public main README and media return HTTP 200. All 71 tests plus the expanded package check pass in CI on Linux Node 20/22/24 and macOS Node 22. Native extension, npm registry access, Cursor and Windows validation remain explicit gaps.
 - [x] Explain how to try and contribute to the kitchen {#ship-kitchen-guide}
   by: codex
   from: agent
