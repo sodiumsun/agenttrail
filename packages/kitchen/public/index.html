@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#d5a054"><meta name="description" content="Your agents, cooking together. A live 3D kitchen for Agenttrail projects.">
+  <title>Agenttrail Kitchen</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/kitchen.css">
+</head>
+<body>
+<main id="app">
+  <div id="world"><canvas id="kitchen" tabindex="0" aria-label="3D agent kitchen. Drag to pan, scroll to zoom, press 0 to fit. Use the chef roster below to select agents with the keyboard."></canvas><div id="chef-labels" aria-hidden="true"></div><div id="notice" role="status"></div></div>
+  <div id="loading"><strong>Opening the kitchen…</strong><span>Setting the table for your agents</span></div>
+  <header class="topbar">
+    <div class="brand"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M11 25C1 25 2 11 11 12C10 3 23 1 26 10C36 5 43 20 30 25L29 35H12Z" fill="#fff9e9" stroke="currentColor" stroke-width="2.2"/><path d="M12 28H29" fill="none" stroke="currentColor" stroke-width="2"/></svg><strong>agenttrail</strong><span>/ kitchen</span></div>
+    <div class="project-controls"><label class="sr-only" for="project">Project</label><select id="project"></select><span id="connection" class="connection"><i></i> Connecting</span></div>
+    <div class="mode-switch" aria-label="Activity source"><button id="live-mode" type="button">Live</button><button id="demo-mode" type="button" class="active">Example</button></div><button id="open-repo" class="cream-button" type="button">Open repo</button><button id="connect" class="cream-button" type="button">Connect agents</button>
+  </header>
+  <section class="order-board" aria-label="Native todo orders"><div class="order-caption"><span id="rail-caption">ON THE MENU</span><div class="rail-actions"><button id="next-example" type="button" hidden>Next example step →</button><button id="attention" type="button" hidden></button><button id="queue-button" type="button" hidden></button><button id="table-button" type="button">Deliverable table ↗</button><button id="all-orders" type="button">Project map ↗</button></div></div><div id="tickets" class="ticket-rail"></div></section>
+  <aside id="inspector" aria-label="Selection details" hidden><button id="close-inspector" class="close-button" type="button" aria-label="Close details">×</button><div id="inspector-content"></div></aside>
+  <div class="kitchen-picker"><button id="kitchen-map" class="map-button" aria-label="View all kitchens" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h7v7H3zm11 0h7v7h-7zM3 14h7v7H3zm11 0h7v7h-7z"/></svg></button><nav id="kitchens" aria-label="Kitchens in this project"></nav><span id="kitchen-count"></span><span id="workflow-summary"></span></div>
+  <footer class="bottom-bar"><div class="crew-dock"><span class="dock-title">IN THE KITCHEN <b id="crew-count">0</b></span><div id="roster" role="group" aria-label="Agent roster"></div></div><div class="view-controls"><button id="record-kitchen" type="button" aria-label="Record kitchen" aria-pressed="false"><span class="record-dot" aria-hidden="true"></span><span id="record-label">Record kitchen</span><span id="record-time" aria-hidden="true" hidden></span></button><button id="pause" type="button" aria-pressed="false" title="Pause chef motion">Ⅱ</button><button id="zoom-out" type="button" aria-label="Zoom out">−</button><button id="room-view" type="button" aria-pressed="false">Room view</button><button id="fit" type="button">Fit kitchen</button><button id="zoom-in" type="button" aria-label="Zoom in">+</button></div><div id="recording-note" hidden><span id="recording-status" role="status"></span><a id="recording-download" hidden>Download recording</a></div></footer>
+  <div id="source-note" class="source-note"></div>
+</main>
+<dialog id="setup-dialog" aria-labelledby="setup-title"><button class="close-button" id="close-setup" aria-label="Close connection settings" type="button">×</button><div class="eyebrow">BRING A WORKING REPO</div><h1 id="setup-title">Open its kitchen</h1><p>Keep your agents working where they are. Choose a recently active folder or paste any local project path. No PLAN.md or Agenttrail installation required.</p><h2 class="recent-title">Recently seen</h2><div id="recent-repos"></div><form id="add-project"><label for="project-path">Or open a folder</label><div class="form-row"><input id="project-path" placeholder="/absolute/path/to/project" required autocomplete="off"><button type="submit" class="blue-button">Open Live kitchen</button></div></form><div id="setup-content"></div><p id="setup-message" role="status"></p></dialog>
+<script type="module" src="/build/app.js"></script>
+</body></html>

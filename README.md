@@ -33,6 +33,22 @@ The browser opens on the live board. On a repo with no plan it offers the full s
 
 That's it. No account, no global install, no telemetry. agenttrail opens on localhost and starts watching the repo.
 
+## Watch your agents cook
+
+**[Agenttrail Kitchen](docs/kitchen/README.md)** is an experimental 3D view in this same project. Responsibilities become chefs, native todos become dishes, and completed tasks travel down a conveyor. Real Codex and Claude sessions have been exercised together; Cursor hooks have automated coverage, with native live validation pending.
+
+![Real coding-agent responsibilities working on a shared dish in Agenttrail Kitchen](docs/kitchen/preview.png)
+
+Kitchen is an optional package. The existing map command stays lightweight and independent. [Try the prebuilt preview](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.1), or run from this repository:
+
+```bash
+npm ci --prefix packages/kitchen
+npm run build --prefix packages/kitchen
+npm start --prefix packages/kitchen -- --project /absolute/path/to/your/repo
+```
+
+No running agent yet? Add `--example` to the last command for a labeled demonstration. Chefs represent responsibilities, so several chefs can belong to one actual session. Artifact transfers require explicit receipts; missing progress stays unknown. [Connection details](docs/kitchen/CONNECTING.md) · [Contribute](CONTRIBUTING.md)
+
 ## How the live agent map works
 
 A plan says what the agent intends to do. The filesystem says what it actually touched. agenttrail shows both.
@@ -80,7 +96,7 @@ The agent studies the code first, git history next, and planning prose last. It 
 
 ## Local by construction
 
-The daemon is one dependency-free Node file, about 470 lines. The interface is one static HTML file. There is no database, build step, cloud service, account, or telemetry.
+The map's daemon is one dependency-free Node file. Its interface is one static HTML file. The map needs no database or build step. The optional kitchen has a separate graphics build, included in its release archive. Neither view needs a cloud service, account, or telemetry.
 
 It binds to **127.0.0.1 only**. Claude Code hooks live in the repo-local `.claude/settings.local.json` and relay events to the local daemon. While it runs, agenttrail only observes. It never sends a prompt or edits your code.
 

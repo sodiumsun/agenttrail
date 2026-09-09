@@ -1,0 +1,43 @@
+name: Kitchen preview
+
+on:
+  push:
+    paths:
+      - 'packages/kitchen/**'
+      - 'docs/kitchen/**'
+      - 'examples/kitchen-workflow/**'
+      - '.github/workflows/kitchen.yml'
+  pull_request:
+    paths:
+      - 'packages/kitchen/**'
+      - 'docs/kitchen/**'
+      - 'examples/kitchen-workflow/**'
+      - '.github/workflows/kitchen.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/kitchen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: packages/kitchen/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm run check
+      - run: npm test
+      - run: npm pack
+      - run: node scripts/check-package.mjs ./agenttrail-kitchen-0.1.0-alpha.1.tgz
+      - run: node --check ../../bin/agenttrail.mjs
