@@ -25,6 +25,8 @@ try{
   await assert.rejects(fs.access(path.join(fixture,'node_modules/three')),{code:'ENOENT'});
   const cli=path.join(installed,pkg.bin['agenttrail-kitchen']);
   assert.match((await run(process.execPath,[cli,'--help'])).stdout,/agenttrail-kitchen/);
+  const launch=args=>run(npm,['exec','--offline','--yes','--','agenttrail-kitchen',...args],{cwd:fixture,timeout:15000});
+  assert.match((await launch(['--help'])).stdout,/Agenttrail Kitchen/);
   const first=path.join(fixture,'first repo'),second=path.join(fixture,"repo with spaces ' and $(literal)");
   const stateDir=path.join(fixture,'state'),observerHome=path.join(fixture,'empty-observer-home');
   await Promise.all([first,second,observerHome].map(p=>fs.mkdir(p)));
@@ -39,11 +41,11 @@ try{
   const initial=await fetch(service.url+'/api/state').then(r=>r.json());
   assert.equal(initial.app,'agenttrail-kitchen');
   assert.deepEqual(initial.executors,[]);
-  const {stdout}=await run(process.execPath,[cli,second,'--state-dir',stateDir,'--no-open'],{timeout:15000});
+  const {stdout}=await launch([second,'--state-dir',stateDir,'--no-open']);
   const live=new URL(stdout.split('\n')[0].replace('Kitchen updated: ',''));
   assert.equal(live.searchParams.get('project'),second);
   assert.equal(live.searchParams.get('mode'),'live');
-  const example=await run(process.execPath,[cli,second,'--example','--state-dir',stateDir,'--no-open'],{timeout:15000});
+  const example=await launch([second,'--example','--state-dir',stateDir,'--no-open']);
   const demo=new URL(example.stdout.split('\n')[0].replace('Kitchen updated: ',''));
   assert.equal(demo.searchParams.get('mode'),'demo');
   assert.equal(demo.searchParams.has('project'),false);

@@ -177,6 +177,10 @@ links: [plan-reader, runs, map]
 - [x] Verify the packaged kitchen in a clean folder {#kitchen-package-check}
   by: codex
   from: agent
+- [x] Start the kitchen through npm's installed command {#kitchen-bin-launch}
+  by: codex
+  from: agent
+  tech: resolve the executable symlink before detecting the CLI entry point; verify actual npm exec rather than only the underlying file
 
 ## Ship to GitHub and npm {#ship}
 needs: [map, explorer]
@@ -232,6 +236,7 @@ files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/
   tech: README definition, sentence-case headings, npm metadata, GitHub description and topics
 
 ## decisions
+- 2026-09-08: The public archive check exposed a symlink entry-point bug: invoking the underlying file worked, but npm's installed command exited without calling main. Fix the entry-point detection and test actual npm exec. Supersede the first preview with alpha.2 rather than silently replacing the published archive.
 - 2026-09-08: The owner approved bringing Kitchen into Agenttrail and releasing an experimental preview. Add the kitchen component because the working scene, observers and packaging own packages/kitchen/** and the release now depends on them. Keep the existing map package unchanged; share more runtime code in subsequent work. Import runtime assets, tests and relevant docs, excluding personal logs, reference screenshots and music. A separate video-editing sub-agent is preparing smooth camera moves from the real footage.
 - 2026-09-08: Prepare a release-structure recommendation for bringing the built kitchen into Agenttrail. The proposal keeps one repository and an optional kitchen package; package migration and publication are not part of this planning change.
 - 2026-09-08: Explore a visually distinct virtual office in sibling ../agent-office. This session produces research, proposed architecture, must-build scope, and comparable visual concepts only. Keep proposed future components in the companion brief until implementation makes them real; do not add speculative components to the existing map.

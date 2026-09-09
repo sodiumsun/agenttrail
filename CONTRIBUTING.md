@@ -30,7 +30,7 @@ The example is scripted and labeled. Live provider validation should use your ow
 npm run check
 npm test
 npm pack
-node scripts/check-package.mjs ./agenttrail-kitchen-0.1.0-alpha.1.tgz
+node scripts/check-package.mjs ./agenttrail-kitchen-0.1.0-alpha.2.tgz
 ```
 
 Keep fixtures synthetic, small and focused on a real failure mode. The package smoke check verifies a clean install with no development dependencies or lifecycle scripts. Run `node --check bin/agenttrail.mjs` at the repository root for changes touching the existing map daemon, and manually check the relevant view.

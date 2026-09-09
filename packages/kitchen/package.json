@@ -1,6 +1,6 @@
 {
   "name": "agenttrail-kitchen",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "type": "module",
   "description": "An experimental local 3D kitchen view for Agenttrail. Watch coding agents contribute to shared tasks.",
   "license": "MIT",

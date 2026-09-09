@@ -1,6 +1,8 @@
-# Kitchen preview 0.1.0-alpha.1
+# Kitchen preview 0.1.0-alpha.2
 
 Agenttrail Kitchen is now part of the Agenttrail source tree under `packages/kitchen`. This is an experimental preview of the existing festival kitchen, not a rewrite of the map.
+
+Alpha.2 fixes startup through npm's installed executable symlink. The first archive's underlying Node file worked, but the npm command could exit without opening a kitchen. The package check now runs actual `npm exec` for help, live repo attachment and example launch. Use alpha.2 rather than alpha.1.
 
 ## Included
 
@@ -25,7 +27,7 @@ Earlier native Codex/Claude collaboration was recorded before this import. Nativ
 
 ## Distribution
 
-The first preview uses a [GitHub prerelease](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.1) with an installable `agenttrail-kitchen-0.1.0-alpha.1.tgz`. npm authentication is currently unavailable, so the registry package and short `npx agenttrail-kitchen` command are not yet published.
+The first preview uses a [GitHub prerelease](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.2) with an installable `agenttrail-kitchen-0.1.0-alpha.2.tgz`. npm authentication is currently unavailable, so the registry package and short `npx agenttrail-kitchen` command are not yet published.
 
 The archive has no runtime npm dependencies. Its built browser bundle includes Three.js; fonts retain their OFL license. It excludes tests, development scripts, original source scene modules, native transcripts, personal configuration, raw recordings, music and reference screenshots. Complete editable source and tests remain in the repository.
 
