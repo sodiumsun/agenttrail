@@ -192,7 +192,7 @@ files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/
 - [x] Show Kitchen clearly and document the verified setup {#ship-kitchen-readiness-docs}
   by: codex
   from: agent
-  tech: merged PR #10 with a Kitchen-first README, public overview and cooking GIF, exact archive install command, browser/editor instructions and troubleshooting. Verified the public main README and media return HTTP 200. All 71 tests plus the expanded package check pass in CI on Linux Node 20/22/24 and macOS Node 22. Native extension, npm registry access, Cursor and Windows validation remain explicit gaps.
+  tech: merged PR #10 with a Kitchen-first README, public overview and cooking GIF, exact archive install command, browser/editor instructions and troubleshooting. Verified the public main README and media return HTTP 200. All 71 tests plus the expanded package check pass in CI on Linux Node 20/22/24 and macOS Node 22. Native extension, Cursor and Windows validation remain explicit gaps.
 - [x] Explain how to try and contribute to the kitchen {#ship-kitchen-guide}
   by: codex
   from: agent
@@ -200,10 +200,14 @@ files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/
   by: codex
   from: agent
   tech: merged via PRs #8 and #9; kitchen-v0.1.0-alpha.2 includes a prebuilt archive and checksum. Public npm exec download, help and cold startup verified.
-- [!] Publish the short kitchen command to npm {#ship-kitchen-registry}
+- [x] Publish the short kitchen command to npm {#ship-kitchen-registry}
   by: codex
   from: agent
-  tech: npm whoami returns Unauthorized; GitHub archive installation works without registry publication.
+  tech: agenttrail-kitchen@0.1.0-alpha.3 is public under latest. Downloaded it without credentials and matched its integrity and bytes to the tested archive. A fresh-cache npx launch opens a live repo and serves bundled assets without writing to the repo. All 71 tests pass; the public archive passes the installed-package/live-event check.
+- [~] Publish the npm setup and matching release archive {#ship-kitchen-npm-guide}
+  by: codex
+  from: agent
+  tech: replace archive-only setup with the verified npx command, retain browser/editor limits, and publish the identical alpha.3 archive with its checksum on GitHub.
 - [x] Show cooking and deliveries through a closer video camera {#ship-kitchen-camera}
   by: codex
   from: agent
@@ -253,6 +257,7 @@ files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/
   tech: README definition, sentence-case headings, npm metadata, GitHub description and topics
 
 ## decisions
+- 2026-09-08: Publish Kitchen to npm now that the owner has restored registry login. Use alpha.3 for the refreshed package README instead of changing the existing alpha.2 archive; keep the experimental version explicit and use the latest tag so npx agenttrail-kitchen . works. Verify the exact public package from a fresh consumer environment, then publish matching GitHub release assets and setup instructions. The owner chose browser setup first; no editor extension is being added.
 - 2026-09-08: Audit the downloadable public Kitchen release from an isolated consumer install, verify real repo observation and adapter behavior, fix launch gaps, and refresh the root README with Kitchen screenshots and exact install/support instructions. No editor extension currently exists; clarify whether the owner wants one built or wants the working browser setup documented. Keep unknown integration status explicit.
 - 2026-09-08: The public archive check exposed a symlink entry-point bug: invoking the underlying file worked, but npm's installed command exited without calling main. Fix the entry-point detection and test actual npm exec. Supersede the first preview with alpha.2 rather than silently replacing the published archive.
 - 2026-09-08: The owner approved bringing Kitchen into Agenttrail and releasing an experimental preview. Add the kitchen component because the working scene, observers and packaging own packages/kitchen/** and the release now depends on them. Keep the existing map package unchanged; share more runtime code in subsequent work. Import runtime assets, tests and relevant docs, excluding personal logs, reference screenshots and music. A separate video-editing sub-agent is preparing smooth camera moves from the real footage.

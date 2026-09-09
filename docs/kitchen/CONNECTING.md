@@ -2,7 +2,7 @@
 
 Keep your existing agents running. In the kitchen, choose **Open repo**, select a recently active folder or paste its absolute path, and open its Live kitchen. It works with an ordinary local folder, including a Git repo, without a PLAN.md or Agenttrail installation. The companion reads the selected project; opening it does not write project files.
 
-After installing the preview, launch it from the working repo with `agenttrail-kitchen .`. From a source checkout, use `node /path/to/agenttrail/packages/kitchen/bin/office.mjs .` after building. An existing companion is reused through its authenticated local registration; the requested folder is added, selected, and opened in Live even if the browser previously showed Example. Repeat `--project /absolute/path` for multiple folders. Up to 12 roots can be watched. `--saved` reopens the saved set. See the [quick start](README.md) for the downloadable package command.
+Launch the preview from the working repo with `npx agenttrail-kitchen .`. From a source checkout, use `node /path/to/agenttrail/packages/kitchen/bin/office.mjs .` after building. An existing companion is reused through its authenticated local registration; the requested folder is added, selected, and opened in Live even if the browser previously showed Example. Repeat `--project /absolute/path` for multiple folders. Up to 12 roots can be watched. `--saved` reopens the saved set. See the [quick start](README.md) for requirements and source setup.
 
 ## What connects automatically
 
@@ -47,7 +47,7 @@ Use **Connect agents → Cursor** to review and install `.cursor/hooks.json` for
 
 | What you see | What to check |
 | --- | --- |
-| The project map opens instead of a kitchen | `npx agenttrail` is the Map. Use the full Kitchen archive command in the [quick start](README.md). The short `npx agenttrail-kitchen` registry command is not published yet. |
+| The project map opens instead of a kitchen | `npx agenttrail` is the Map. Use `npx agenttrail-kitchen .` to open Kitchen in the current repo. See the [quick start](README.md). |
 | A kitchen appears but nobody works | Select **Live**, choose the same local repo as the agent, and check **Connect agents**. Allow about five seconds for discovery. An idle agent does not generate work. |
 | Codex or Claude is running but not listed | Confirm that logs are on this machine and their recorded working directory belongs to the selected repo. Custom `CODEX_HOME` / `CLAUDE_CONFIG_DIR` must be set in the terminal that launches Kitchen. Cloud-only logs are not discovered. |
 | Cursor activity is missing | Install its optional hooks through **Connect agents**, then start a new conversation if the current one does not load them. Native Cursor live validation is still pending. |
