@@ -1,0 +1,33 @@
+{
+  "name": "agenttrail-kitchen",
+  "version": "0.1.0-alpha.1",
+  "type": "module",
+  "description": "An experimental local 3D kitchen view for Agenttrail. Watch coding agents contribute to shared tasks.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sodiumsun/agenttrail.git",
+    "directory": "packages/kitchen"
+  },
+  "homepage": "https://github.com/sodiumsun/agenttrail/tree/main/docs/kitchen",
+  "bugs": "https://github.com/sodiumsun/agenttrail/issues",
+  "files": ["bin", "src", "public/build", "public/fonts", "public/index.html", "public/kitchen.css", "public/favicon.svg", "public/paper.svg", "docs/THIRD-PARTY.md", "docs/licenses", "LICENSE", "README.md"],
+  "bin": {
+    "agenttrail-kitchen": "bin/office.mjs"
+  },
+  "scripts": {
+    "start": "node bin/office.mjs",
+    "test": "node --test --test-concurrency=1",
+    "check": "node --check bin/office.mjs && node --check src/server.mjs",
+    "build": "node scripts/build.mjs",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "three": "0.186.0",
+    "@fontsource/nunito": "^5.2.7",
+    "esbuild": "0.25.12"
+  }
+}

@@ -1,0 +1,36 @@
+name: Kitchen problem
+description: Report a scene, provider connection or first-run issue in Agenttrail Kitchen.
+labels: [kitchen, bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Kitchen version
+      description: Include the release tag or source commit.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node version, browser and coding agent.
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Which view is affected?
+      options:
+        - Live
+        - Example
+        - Both
+        - Installation or startup
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: What happened?
+      description: Steps to reproduce, expected behavior and actual behavior. Redact private paths and task titles. Do not attach native transcripts or credentials.
+    validations:
+      required: true

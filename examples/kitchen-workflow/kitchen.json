@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "kitchens": [
+    {
+      "id": "shared",
+      "title": "Maze Shift",
+      "components": [
+        "research",
+        "world",
+        "simulation",
+        "gameplay",
+        "review",
+        "launch"
+      ]
+    }
+  ],
+  "deliverables": [],
+  "workflow": {
+    "id": "maze-shift",
+    "title": "Ship Maze Shift",
+    "roles": [
+      {
+        "id": "researcher",
+        "title": "Researcher",
+        "components": [
+          "research"
+        ],
+        "files": [
+          "research/**",
+          "docs/CONTRACT.md"
+        ]
+      },
+      {
+        "id": "world-builder",
+        "title": "World builder",
+        "components": [
+          "world"
+        ],
+        "files": [
+          "src/world.js"
+        ]
+      },
+      {
+        "id": "simulation-engineer",
+        "title": "Simulation engineer",
+        "components": [
+          "simulation"
+        ],
+        "files": [
+          "src/sim.js",
+          "src/maze.js"
+        ]
+      },
+      {
+        "id": "gameplay-engineer",
+        "title": "Gameplay engineer",
+        "components": [
+          "gameplay"
+        ],
+        "files": [
+          "src/main.js",
+          "public/**"
+        ]
+      },
+      {
+        "id": "reviewer",
+        "title": "Reviewer",
+        "components": [
+          "review"
+        ],
+        "files": [
+          "tests/**",
+          "docs/REVIEW.md"
+        ]
+      },
+      {
+        "id": "producer",
+        "title": "Producer",
+        "components": [
+          "launch"
+        ],
+        "files": [
+          "scripts/**"
+        ]
+      }
+    ]
+  }
+}
