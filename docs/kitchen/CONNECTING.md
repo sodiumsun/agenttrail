@@ -36,3 +36,26 @@ The companion reads a bounded metadata header from recent local Codex/Claude log
 Default stores are `~/.codex/sessions` and `~/.claude/projects`; the production observer also honors `CODEX_HOME` and `CLAUDE_CONFIG_DIR`. Remote/cloud sessions whose logs are not on this machine are not automatically visible.
 
 Discovery refreshes about every five seconds. It considers files modified within 24 hours, examines up to 240 recent metadata candidates, retains up to 120 observation streams, and suggests up to 24 folders (eight in the picker). Each initial replay is bounded to the last 2 MiB. Larger archives can hit these bounds; `discoveryLimited` appears in the local state response. Missing older history stays unknown. Quiet activity is not presented as continuously working, and native orders are reconstructed from available observations after restart.
+
+## VS Code and Cursor
+
+Kitchen currently opens in a browser. There is no Agenttrail Kitchen VS Code Marketplace extension or VSIX release. Run the [preview command](README.md#start-with-your-repo) in your editor's integrated terminal and keep the browser beside it. The editor does not need a separate extension to run the companion.
+
+Use **Connect agents → Cursor** to review and install `.cursor/hooks.json` for the selected repo. This connects Cursor agent events; it does not install an editor panel. Claude's optional hooks use `.claude/settings.local.json`. Existing unrelated hooks are preserved. Removal is available from the same panel. After a Kitchen upgrade or clearing npm's cache, reconnect hooks if their saved executable path is no longer available.
+
+## Troubleshooting
+
+| What you see | What to check |
+| --- | --- |
+| The project map opens instead of a kitchen | `npx agenttrail` is the Map. Use the full Kitchen archive command in the [quick start](README.md). The short `npx agenttrail-kitchen` registry command is not published yet. |
+| A kitchen appears but nobody works | Select **Live**, choose the same local repo as the agent, and check **Connect agents**. Allow about five seconds for discovery. An idle agent does not generate work. |
+| Codex or Claude is running but not listed | Confirm that logs are on this machine and their recorded working directory belongs to the selected repo. Custom `CODEX_HOME` / `CLAUDE_CONFIG_DIR` must be set in the terminal that launches Kitchen. Cloud-only logs are not discovered. |
+| Cursor activity is missing | Install its optional hooks through **Connect agents**, then start a new conversation if the current one does not load them. Native Cursor live validation is still pending. |
+| Progress is unknown or there are no dishes | The session has not supplied a supported native todo list. File activity and durable `PLAN.md` tasks do not become invented native todos. |
+| Several chefs are waiting | They are persistent responsibilities, not independently launched agents. One session can work through them sequentially. |
+| No plate passes between agents | Confirmed transfers need explicit artifact/revision/receipt metadata. Similar filenames and ordinary reads do not establish a handoff. See [the contract](HANDOFFS.md). |
+| The scene stays blank | Use an up-to-date browser with WebGL enabled. From source, run the graphics build first; the release archive already includes it. |
+| The browser does not open automatically | Open the localhost URL printed by the terminal. Keep that terminal running. |
+| Port 4780 is occupied | Kitchen reuses its registered local service or tries the next free port. Use the URL it prints. |
+
+For a connection-independent check, add `--example` to the launch command and advance **Next example step**. Example is scripted and labeled; it verifies the scene, not your live provider connection. Include your OS, Node version, package version and whether Example works when [reporting an issue](https://github.com/sodiumsun/agenttrail/issues).

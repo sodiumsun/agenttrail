@@ -1,5 +1,7 @@
 # Agenttrail Kitchen
 
+[![Agenttrail Kitchen overview](https://raw.githubusercontent.com/sodiumsun/agenttrail/main/docs/kitchen/overview.jpg)](https://github.com/sodiumsun/agenttrail/tree/main/docs/kitchen)
+
 Your coding agents, cooking together. An experimental 3D view in [Agenttrail](https://github.com/sodiumsun/agenttrail), a local, open-source monitor for coding agents.
 
 Native todos become order tickets, project responsibilities become chefs, and completed todos travel to the deliverable table. Several chefs can contribute to one dish. A chef is a role, so one actual session can work through several chefs; the interface keeps session counts separate. Confirmed artifact receipts can animate plates moving between contributors.
@@ -30,6 +32,8 @@ Local file watching remains available without native todos. Missing tasks or pro
 
 Choose **Connect agents** to review optional Claude or Cursor hook changes. Installation is additive, reversible and explicit. The kitchen never sends prompts, approves actions or changes task status in your agents.
 
+VS Code and Cursor users can run the command in their integrated terminal and keep Kitchen's browser beside the editor. There is no Agenttrail Kitchen Marketplace extension or VSIX release yet. Cursor hooks are a provider connection, not an editor extension. See [troubleshooting](https://github.com/sodiumsun/agenttrail/blob/main/docs/kitchen/CONNECTING.md#troubleshooting).
+
 ## Develop from source
 
 From the repository root:
@@ -50,7 +54,7 @@ npm pack
 node scripts/check-package.mjs ./agenttrail-kitchen-0.1.0-alpha.2.tgz
 ```
 
-The package smoke check installs into an isolated temporary folder without lifecycle scripts or development dependencies, launches the installed command, verifies bundled assets and checks repo attachment. It does not use your real agent logs or saved kitchen state.
+The package smoke check installs into an isolated temporary folder without lifecycle scripts or development dependencies, launches the installed command, verifies bundled assets and checks repo attachment. Synthetic local logs then verify fresh events over the live stream, one session moving through multiple chefs on one dish, completion at the table, and file observation. It does not use your real agent logs or saved kitchen state.
 
 ## Learn more
 

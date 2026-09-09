@@ -7,12 +7,14 @@ on:
       - 'docs/kitchen/**'
       - 'examples/kitchen-workflow/**'
       - '.github/workflows/kitchen.yml'
+      - 'README.md'
   pull_request:
     paths:
       - 'packages/kitchen/**'
       - 'docs/kitchen/**'
       - 'examples/kitchen-workflow/**'
       - '.github/workflows/kitchen.yml'
+      - 'README.md'
 
 permissions:
   contents: read
@@ -23,7 +25,11 @@ jobs:
       fail-fast: false
       matrix:
         node: [20, 22, 24]
-    runs-on: ubuntu-latest
+        os: [ubuntu-latest]
+        include:
+          - node: 22
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: packages/kitchen

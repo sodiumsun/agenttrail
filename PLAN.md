@@ -181,10 +181,17 @@ links: [plan-reader, runs, map]
   by: codex
   from: agent
   tech: resolve the executable symlink before detecting the CLI entry point; verify actual npm exec rather than only the underlying file
+- [x] Verify the public install observes a fresh working repo {#kitchen-public-readiness}
+  by: codex
+  from: agent
+  tech: downloaded the exact public alpha.2 archive without GitHub credentials, matched its checksum, launched with a fresh npm cache, and observed this real working repo in the browser. All 71 tests pass. Expanded the package check to verify fresh logs over SSE, one session contributing through multiple chefs, native dish completion, and file observation; the public archive passes it.
 
 ## Ship to GitHub and npm {#ship}
 needs: [map, explorer]
 files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/**]
+- [~] Show Kitchen clearly and document the verified setup {#ship-kitchen-readiness-docs}
+  by: codex
+  from: agent
 - [x] Explain how to try and contribute to the kitchen {#ship-kitchen-guide}
   by: codex
   from: agent
@@ -245,6 +252,7 @@ files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/
   tech: README definition, sentence-case headings, npm metadata, GitHub description and topics
 
 ## decisions
+- 2026-09-08: Audit the downloadable public Kitchen release from an isolated consumer install, verify real repo observation and adapter behavior, fix launch gaps, and refresh the root README with Kitchen screenshots and exact install/support instructions. No editor extension currently exists; clarify whether the owner wants one built or wants the working browser setup documented. Keep unknown integration status explicit.
 - 2026-09-08: The public archive check exposed a symlink entry-point bug: invoking the underlying file worked, but npm's installed command exited without calling main. Fix the entry-point detection and test actual npm exec. Supersede the first preview with alpha.2 rather than silently replacing the published archive.
 - 2026-09-08: The owner approved bringing Kitchen into Agenttrail and releasing an experimental preview. Add the kitchen component because the working scene, observers and packaging own packages/kitchen/** and the release now depends on them. Keep the existing map package unchanged; share more runtime code in subsequent work. Import runtime assets, tests and relevant docs, excluding personal logs, reference screenshots and music. A separate video-editing sub-agent is preparing smooth camera moves from the real footage.
 - 2026-09-08: Prepare a release-structure recommendation for bringing the built kitchen into Agenttrail. The proposal keeps one repository and an optional kitchen package; package migration and publication are not part of this planning change.

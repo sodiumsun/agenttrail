@@ -2,7 +2,7 @@
 
 Watch coding agents work through a shared 3D kitchen. Agenttrail's map shows project structure; Kitchen shows the current work as chefs, order tickets, ingredients and deliveries. Both belong to the same open-source project. Kitchen is an experimental, independently installed package.
 
-![Chefs contributing to a shared task in a recorded Codex and Claude collaboration](preview.png)
+![Full kitchen with chefs contributing to a shared task in a recorded Codex and Claude collaboration](overview.jpg)
 
 ## Start with your repo
 
@@ -53,6 +53,8 @@ Click a chef or ticket to inspect the evidence. Drag to pan, scroll to zoom, and
 | Cursor | Optional hooks | Automated coverage; native live validation pending |
 
 Formats can change, and missing observations remain unknown. Only sessions with accessible local metadata can be discovered. [Connection details](CONNECTING.md) explain discovery limits and optional hook setup.
+
+VS Code and Cursor can launch the browser companion from their integrated terminal. There is no Agenttrail Kitchen Marketplace extension or VSIX release yet. [Editor setup and troubleshooting](CONNECTING.md#vs-code-and-cursor)
 
 ## Customize and contribute
 
