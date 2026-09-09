@@ -33,7 +33,7 @@ npm pack
 node scripts/check-package.mjs ./agenttrail-kitchen-0.1.0-alpha.2.tgz
 ```
 
-Keep fixtures synthetic, small and focused on a real failure mode. The package smoke check verifies a clean install with no development dependencies or lifecycle scripts. Run `node --check bin/agenttrail.mjs` at the repository root for changes touching the existing map daemon, and manually check the relevant view.
+Keep fixtures synthetic, small and focused on a real failure mode. The package smoke check verifies a clean install with no development dependencies or lifecycle scripts, then appends synthetic native logs and checks the live event stream: one session contributes through multiple chefs to one dish, completion reaches its table, and repo file changes are observed. It never uses real home-directory transcripts. Run `node --check bin/agenttrail.mjs` at the repository root for changes touching the existing map daemon, and manually check the relevant view.
 
 ## Preserve the meaning of activity
 

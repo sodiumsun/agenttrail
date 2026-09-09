@@ -7,105 +7,84 @@
 
 # agenttrail
 
-**Know what your coding agents are doing, while they are doing it.**
+**See what your coding agents are doing—in a live project map or a shared 3D kitchen.**
 
-[![npm](https://img.shields.io/npm/v/agenttrail?color=e9a23b&label=npm)](https://www.npmjs.com/package/agenttrail)
-[![downloads](https://img.shields.io/npm/dm/agenttrail?color=e9a23b&label=downloads)](https://www.npmjs.com/package/agenttrail)
+[![Kitchen preview](https://img.shields.io/badge/Kitchen-public_preview-e9a23b)](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.2)
+[![Map on npm](https://img.shields.io/npm/v/agenttrail?color=e9a23b&label=map%20on%20npm)](https://www.npmjs.com/package/agenttrail)
+[![Kitchen checks](https://github.com/sodiumsun/agenttrail/actions/workflows/kitchen.yml/badge.svg)](https://github.com/sodiumsun/agenttrail/actions/workflows/kitchen.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![stars](https://img.shields.io/github/stars/sodiumsun/agenttrail?style=social)](https://github.com/sodiumsun/agenttrail)
 
 </div>
 
-Your coding agent has been working for half an hour. Is it making progress? Is it stuck? Did it quietly reopen the part it already called done?
+Agenttrail is a local, open-source monitor for AI coding agents. **Agenttrail Kitchen** turns their current work into chefs, shared dishes and deliveries. **Agenttrail Map** shows the durable plan, file activity and dependencies. Both live in this repository; each has its own command.
 
-agenttrail is a local, open-source observability layer for AI coding agents. It turns plans, tool calls, file changes, and progress from Claude Code, OpenAI Codex, Cursor, or any agent that edits files into a live project map.
+[![Agenttrail Kitchen overview: six project responsibilities working together, with shared dishes and a delivery conveyor](docs/kitchen/overview.jpg)](docs/kitchen/README.md)
 
-Start an agent, walk away, and come back to this:
+*Recorded while real Codex and Claude sessions built a small 3D maze game. Chefs represent responsibilities, not necessarily separate agent processes.*
 
-![agenttrail watching itself being built: a Claude session appears with its plan, edits stream live, and the demo task ticks green on camera](docs/demo.gif)
+## Run Kitchen in your repo
+
+You need **Node.js 20+**, a browser with WebGL, and a local project folder. Run this in the repo you want to watch:
+
+```bash
+npm exec --yes --package=https://github.com/sodiumsun/agenttrail/releases/download/kitchen-v0.1.0-alpha.2/agenttrail-kitchen-0.1.0-alpha.2.tgz -- agenttrail-kitchen .
+```
+
+The browser opens at **localhost:4780** (or the next free port). Keep this terminal open and keep working in your coding agent. Codex and Claude Code activity is discovered from available local logs. No `PLAN.md`, Agenttrail Map installation, copied files, API key or new agent session is required for basic observation. The watcher does not launch agents or edit your repo.
+
+**Want to see it before connecting an agent?** Add `--example` to the command, then click **Next example step**. This is a labeled, scripted example. Click **Live** to return to your real repo.
+
+**This is a public experimental preview.** The downloadable archive includes the graphics and fonts, so users do not need a build step. `npx agenttrail-kitchen` is not published to npm yet; use the exact command above. `npx agenttrail` opens the Map, not Kitchen.
+
+[Kitchen guide](docs/kitchen/README.md) · [Connect agents and troubleshoot](docs/kitchen/CONNECTING.md) · [Release and verification](docs/kitchen/RELEASE.md)
+
+## Watch the work become dishes
+
+![Real recorded cooking and handoffs, with camera close-ups to show the agents working together](docs/kitchen/cooking.gif)
+
+| In the kitchen | In your project |
+| --- | --- |
+| Chef | A project responsibility; the actual provider and session remain inspectable |
+| Ticket / dish | An available native todo, with its own wording and status |
+| Cooking | Observed work associated with that responsibility |
+| Several chefs on one ticket | Contributions from roles or sessions associated with the same todo |
+| Plate transfer | Explicit artifact revision and receipt metadata |
+| Delivery conveyor | A native todo reported complete |
+
+One session can move between several chefs as its work changes. Roles adapt to the project; you can refine them with an optional [workflow configuration](examples/kitchen-workflow). Multiple kitchens organize larger workflows. Click a chef or ticket to inspect its evidence.
+
+**What happens automatically:** local activity, supported native todos, inferred responsibilities and todo completion. **What needs extra metadata:** confirmed handoffs and explicitly sharing one todo across separate sessions. The recorded multi-agent demo used these bindings; merely opening any repo does not create them. Missing plans stay **progress unknown**, and ending a turn does not mean a deliverable shipped.
+
+## Use it with your coding agent or editor
+
+| Tool | Kitchen connection | Current verification |
+| --- | --- | --- |
+| Codex CLI / local Codex desktop sessions | Reads available local session logs automatically | Real local collaboration exercised |
+| Claude Code | Reads local project logs; optional additive hooks via **Connect agents** | Real local collaboration exercised |
+| Cursor agents | Choose **Connect agents → Cursor** and review the repo hook setup | Adapter tests pass; native Cursor live validation pending |
+| VS Code | Run the Kitchen command in its integrated terminal; use Codex or Claude Code as above | Browser companion; no Agenttrail editor extension shipped yet |
+| Other tools | File changes remain visible; native sessions and todos need a supported adapter | File observation only |
+
+For VS Code or Cursor, keep the browser beside your editor. The current integration is a **local companion**, not a Marketplace extension. Hook setup is explicit and reversible; restart an agent conversation if it does not load newly installed hooks.
+
+Local observation has been exercised on macOS; automated package and adapter checks run on Linux. Windows and native Cursor validation remain pending. Cloud/remote sessions with no logs on the Kitchen host are not automatically discovered. [Details and limits](docs/kitchen/CONNECTING.md)
+
+## Run the project map
+
+The original map stays lightweight and independently installable:
 
 ```bash
 cd your-repo
 npx agenttrail
 ```
 
-The browser opens on the live board. On a repo with no plan it offers the full setup inline — one y/n, and the backfill prompt lands on your clipboard. Hooks are only wired with your consent. After a reboot, `npx agenttrail up` relaunches every board you've ever run; `npx agenttrail autostart` makes a repo's board start at login and self-heal.
+![Agenttrail Map showing live sessions, component progress and file changes](docs/demo.gif)
 
-That's it. No account, no global install, no telemetry. agenttrail opens on localhost and starts watching the repo.
+The Map combines declared intent in `PLAN.md` with observed file changes. A completed component lights up when its files change again. Current Claude Code runs and their todos appear through optional local hooks. Codex, Cursor and other tools contribute through file observation and the shared plan convention.
 
-## Watch your agents cook
+For the full component map, run `npx agenttrail init`, review the setup, then give your agent the backfill prompt from the board. It adds the convention to `CLAUDE.md` and `AGENTS.md`, creates a starter plan, and installs additive local Claude Code hooks. **Setup writes these files; normal watching does not.**
 
-**[Agenttrail Kitchen](docs/kitchen/README.md)** is an experimental 3D view in this same project. Responsibilities become chefs, native todos become dishes, and completed tasks travel down a conveyor. Real Codex and Claude sessions have been exercised together; Cursor hooks have automated coverage, with native live validation pending.
-
-![Real coding-agent responsibilities working on a shared dish in Agenttrail Kitchen](docs/kitchen/preview.png)
-
-Kitchen is an optional package. The existing map command stays lightweight and independent. [Try the prebuilt preview](https://github.com/sodiumsun/agenttrail/releases/tag/kitchen-v0.1.0-alpha.2), or run from this repository:
-
-```bash
-npm ci --prefix packages/kitchen
-npm run build --prefix packages/kitchen
-npm start --prefix packages/kitchen -- --project /absolute/path/to/your/repo
-```
-
-No running agent yet? Add `--example` to the last command for a labeled demonstration. Chefs represent responsibilities, so several chefs can belong to one actual session. Artifact transfers require explicit receipts; missing progress stays unknown. [Connection details](docs/kitchen/CONNECTING.md) · [Contribute](CONTRIBUTING.md)
-
-## How the live agent map works
-
-A plan says what the agent intends to do. The filesystem says what it actually touched. agenttrail shows both.
-
-| Signal | What it tells you |
-|---|---|
-| **Declared** | The component and task the agent says it is working on |
-| **Observed** | The files it is changing right now, including revisions to finished work |
-
-When those signals disagree, you know where to look. A completed card lights up when its files change again. A live run sits on the component it is touching. The map moves as the work moves.
-
-## What you see
-
-- A map of 5–9 real components, with dependency arrows, dashed links, progress, and honest done, working, or blocked states
-- The current Claude Code run, including its task list, streaming tool line, elapsed time, and recent calls
-- The agent's own session plan inside the component it is working on, fading out a couple of hours after the run ends
-- A VS Code style repo tree with live "just touched" accents and a **Working** signal
-- Provenance pills that keep imminent agent intent separate from roadmap backlog
-- The Claude spark, OpenAI blossom, or contributor initials on completed tasks
-- One daemon per repo, with every live board in one tab switcher. Adding a repo is a sentence to your agent — *"run npx agenttrail in this repo"* — and the tab appears on every board within seconds; kill that daemon and it disappears everywhere
-
-Instead of replaying a transcript, agenttrail shows the shape of the work, updated live.
-
-## Give it the real map
-
-The first command works with any repo. You immediately get the live file tree, activity state, and Claude Code run cards when local hooks are present.
-
-For the full component map, run this once:
-
-```bash
-npx agenttrail init
-```
-
-`init` adds the agenttrail convention to `CLAUDE.md` and `AGENTS.md`, creates a starter `PLAN.md`, and installs additive local Claude Code hooks. Then click **Copy backfill prompt** on the board and paste it to your agent.
-
-The agent studies the code first, git history next, and planning prose last. It draws the repo as 5–9 components with real dependencies and verifiable statuses. You do not maintain a project-management board. Your agents maintain one small Markdown file as they work.
-
-## Supported coding agents
-
-| Agent | Live activity | Run cards and todos | Maintains the map |
-|---|---|---|---|
-| Claude Code | ✅ file watcher | ✅ local hooks | ✅ `CLAUDE.md` |
-| OpenAI Codex | ✅ file watcher | — | ✅ `AGENTS.md` |
-| Cursor or anything else | ✅ file watcher | — | ✅ `AGENTS.md` |
-
-## Local by construction
-
-The map's daemon is one dependency-free Node file. Its interface is one static HTML file. The map needs no database or build step. The optional kitchen has a separate graphics build, included in its release archive. Neither view needs a cloud service, account, or telemetry.
-
-It binds to **127.0.0.1 only**. Claude Code hooks live in the repo-local `.claude/settings.local.json` and relay events to the local daemon. While it runs, agenttrail only observes. It never sends a prompt or edits your code.
-
-The entire model comes from two sources:
-
-1. `PLAN.md`, the durable map curated by your agents
-2. Local events, the live trail that fades as activity gets old
-
-Read the core: [`bin/agenttrail.mjs`](bin/agenttrail.mjs).
+The map has a live file tree, dependency links, session trails and an overview of multiple repos. `npx agenttrail up` relaunches saved boards after a reboot; `npx agenttrail autostart` configures startup at login.
 
 <details>
 <summary><b>The PLAN.md convention</b></summary>
@@ -121,7 +100,7 @@ files: [src/audio/**]
 - [~] Keep the last 30 seconds ready {#capture-ring}
   by: claude
 
-## Decide what matters {#classify}
+## Classify the alerts {#classify}
 needs: [capture]
 links: [notify]
 - [ ] Score events by urgency {#classify-score}
@@ -142,22 +121,44 @@ links: [notify]
 
 </details>
 
+## Build Kitchen from source
+
+```bash
+git clone https://github.com/sodiumsun/agenttrail.git
+cd agenttrail
+npm ci --prefix packages/kitchen
+npm run build --prefix packages/kitchen
+npm start --prefix packages/kitchen -- --project /absolute/path/to/your/repo
+```
+
+Rebuild after frontend changes. The source, tests, original scene assets and third-party notices are all available in this repo. [Contributor setup and checks](CONTRIBUTING.md)
+
+## Local by construction
+
+Both services bind to **127.0.0.1**. No account, telemetry, transcript upload, model calls or cloud service is required. Fonts and graphics are bundled locally. Kitchen reads bounded local metadata and sends only allowlisted activity fields to its browser; task titles and project paths can still be visible on screen.
+
+The Map is a dependency-free Node daemon and a static page. Kitchen is a separate package with a bundled Three.js frontend. Neither controls your agents, sends prompts, approves actions or marks their tasks complete.
+
 ## FAQ
 
-**Does it work without `PLAN.md`?** Yes. The live tree, activity feed, and run cards need no plan. The map appears when your agent writes one.
+**Will this work in an existing repo?** Yes, run the Kitchen command from its folder. Git and `PLAN.md` are optional. A live coding session needs accessible local Codex/Claude logs or configured Cursor hooks. If no activity is available, the chefs wait; use Example to explore the interface.
 
-**What does coding agent observability mean here?** LLM observability usually focuses on traces, latency, tokens, and cost. agenttrail focuses on the work happening in a repo: which component an agent is in, what tool it is running, what files it is changing, and whether its plan is moving.
+**Why is the kitchen quiet?** Check **Live**, the selected repo and **Connect agents**. Discovery can take about five seconds. Unsupported remote sessions, missing log history and agents waiting for input can all produce a quiet view. [Troubleshooting](docs/kitchen/CONNECTING.md#troubleshooting)
 
-**Which AI coding agents does agenttrail support?** Claude Code has the richest live view through local hooks. OpenAI Codex, Cursor, and any agent that edits files work through the repo watcher and can maintain the map through `AGENTS.md`.
+**Does the demo work without running an agent?** Yes: add `--example`, then advance with **Next example step**. Scripted example activity is labeled and separate from live observations.
 
-**Does agenttrail control my agent?** No. It observes and draws. It never sends a prompt. `init` prints the optional backfill prompt, and the board can copy it to your clipboard.
+**Where is the VS Code extension?** There is no Agenttrail Kitchen Marketplace extension yet. Run the companion from VS Code's integrated terminal and keep its browser view beside the editor. Cursor's optional hooks connect agent events; they are not an editor extension.
 
-**What does `init` change?** It creates the starter plan, appends the convention to the repo's agent instruction files, adds `.agenttrail/` to `.gitignore`, and installs local Claude Code hooks. The running dashboard itself is read only.
+**Are six chefs six running agents?** Not necessarily. Chefs represent roles. Kitchen shows the real session count separately, so one session can contribute through several roles without pretending to run in parallel.
 
-**What about a huge repo?** agenttrail has been tested on a 78k-file repo. It reads the tree breadth first with per-directory caps, sends tiny SSE activity ticks, and tells you when the tree is abridged.
+**Is a delivered dish a deployed feature?** It means the native todo was reported complete. Deployment, publication and artifact transfer require their own evidence.
 
-**What if the plan goes stale?** Tell any agent: `re-verify PLAN.md against the code.` The board updates as the file does.
+**What changes in my repo?** Opening Kitchen does not change it. Optional hook installation edits only the reviewed provider settings. Optional `.office/kitchen.json` defines your workflow. Map `init` is a separate setup operation that creates the plan and agent conventions.
 
-## License
+**What is still experimental?** Local provider log formats can change. Cursor's native live behavior and Windows remain unverified. Shared artifact receipts need explicit integration, and order history is reconstructed from available observations after restarting. Kitchen's short npm command and editor extension are not published.
 
-MIT
+## Contribute and license
+
+[Report a bug](https://github.com/sodiumsun/agenttrail/issues) · [Contributing](CONTRIBUTING.md) · [Kitchen source](packages/kitchen) · [Third-party notices](packages/kitchen/docs/THIRD-PARTY.md)
+
+MIT for the project code and original assets. The repository does not distribute Overcooked assets or soundtrack files; Kitchen is an independent cooking-game-inspired view.
