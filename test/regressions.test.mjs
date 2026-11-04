@@ -105,3 +105,68 @@ describe('hooks from an earlier install', () => {
   })
 })
 
+describe('run status', () => {
+  const session = 'status-1'
+  const logWorld = async () => {
+    world = tempWorld()
+    const claude = path.join(world.home, '.claude')
+    const dir = path.join(claude, 'projects', 'p')
+    fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, `${session}.jsonl`)
+    fs.writeFileSync(file, `${JSON.stringify({ type: 'last-prompt', sessionId: session, cwd: world.repo })}\n`) // found at boot, so a test waits two seconds, not ten
+    const map = await startMap({ repo: world.repo, home: world.home, base: await freePortBase(), env: { CLAUDE_CONFIG_DIR: claude } })
+    const write = (...rows) => fs.appendFileSync(file, rows.map(r => JSON.stringify({ sessionId: session, cwd: world.repo, isSidechain: false, ...r }) + '\n').join(''))
+    const hook = ev => map.post('/hook', { cwd: world.repo, session_id: session, ...ev })
+    const run = async () => (await map.model()).runs.find(r => r.id === session)
+    return { map, write, hook, run }
+  }
+  const user = (at, text) => ({ type: 'user', timestamp: iso(at), message: { role: 'user', content: text } })
+
+  test('a session that only opened is waiting, not working', async () => {
+    const map = await boot('# p\n')
+    const start = source => map.post('/hook', { cwd: world.repo, session_id: source, hook_event_name: 'SessionStart', source })
+    const status = async id => (await map.model()).runs.find(r => r.id === id).status
+    for (const source of ['startup', 'resume', 'clear']) { await start(source); assert.equal(await status(source), 'idle', source) }
+    await start('compact') // compaction happens inside a working turn
+    assert.equal(await status('compact'), 'active')
+  })
+  test('an interruption is seen even though its tool hook lands just after the row', async () => {
+    const { write, hook, run } = await logWorld()
+    await hook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'sleep' } })
+    const stopped = Date.now()
+    await hook({ hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_input: { command: 'sleep' } })
+    write(user(stopped, '[Request interrupted by user for tool use]'))
+    assert.equal(await until(async () => (await run()).status === 'interrupted' && 'ok', 'the interruption', 15_000), 'ok')
+  })
+  test('a first prompt is seen even though SessionStart lands just after it', async () => {
+    const { write, hook, run } = await logWorld()
+    const asked = Date.now()
+    await hook({ hook_event_name: 'SessionStart', source: 'startup' })
+    write(user(asked, 'do the thing'))
+    assert.equal(await until(async () => (await run()).status === 'active' && 'ok', 'the prompt', 15_000), 'ok')
+  })
+  test('an old interruption does not end a turn that has moved on', async () => {
+    const { write, hook, run } = await logWorld()
+    await hook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } })
+    write(user(Date.now() - 60_000, '[Request interrupted by user]'), user(Date.now() - 59_000, 'next'))
+    await new Promise(r => setTimeout(r, 3000))
+    assert.equal((await run()).status, 'active')
+  })
+  test('activity after a silence is not called idle', async () => {
+    const claude = 'silent-1'
+    world = tempWorld()
+    const dir = path.join(world.home, '.agenttrail')
+    fs.mkdirSync(dir)
+    const now = Date.now()
+    const base = await freePortBase()
+    const stateName = (await import('node:crypto')).createHash('sha1').update(world.repo).digest('hex').slice(0, 12) + '.json'
+    const old = { id: claude, agent: 'claude', provider: 'claude', source: 'hook', cwd: world.repo, startedAt: now - 2e6, lastEventAt: now - 20 * 60e3, todos: [], todosUpdatedAt: null, currentTool: { name: 'Bash', detail: 'long', at: now - 20 * 60e3 }, recentTools: [], componentId: null, ended: false }
+    fs.writeFileSync(path.join(dir, stateName), JSON.stringify({ repoPath: world.repo, port: base, runs: { [claude]: old } }))
+    const map = await startMap({ repo: world.repo, home: world.home, base })
+    const run = async () => (await map.model()).runs.find(r => r.id === claude)
+    assert.equal((await run()).status, 'unknown')
+    await map.post('/hook', { cwd: world.repo, session_id: claude, hook_event_name: 'SubagentStop' })
+    assert.equal((await run()).status, 'active')
+  })
+})
+

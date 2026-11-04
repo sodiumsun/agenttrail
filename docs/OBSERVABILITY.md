@@ -52,7 +52,7 @@ Map reads sessions working inside the watched repo, from logs touched in the las
 
 **Codex.** Map follows `CODEX_HOME` when it is set. Recent versions run tools inside an `exec` wrapper and report most of them as completed items, including file changes. Plans made inside that wrapper do not appear as an `update_plan` call, so those runs show their todos as unknown.
 
-**Hooks and logs together.** One Claude session is one run, under its session id. Hooks are live, so a log row counts only if it is newer than the last hook heard. That lets the log fill in while Map was down or when hooks are not installed, without counting a call twice. Only hooks supply `terminalId`, and only when the terminal sets `HC_TERMINAL_ID`; log-only runs never have one. Hooks also let Map remind the agent at session start when the plan has fallen behind the code.
+**Hooks and logs together.** One Claude session is one run, under its session id. Hooks are live, so a log row counts only if it is newer than the last hook heard, give or take the moment a relay takes to arrive for rows only the log reports. That lets the log fill in while Map was down or when hooks are not installed, without counting a call twice. Only hooks supply `terminalId`, and only when the terminal sets `HC_TERMINAL_ID`; log-only runs never have one. Hooks also let Map remind the agent at session start when the plan has fallen behind the code.
 
 ## The panel feed
 

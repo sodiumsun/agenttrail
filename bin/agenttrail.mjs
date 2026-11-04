@@ -275,6 +275,12 @@ function addSubagent(run, sub) {
   ;(run.subagents = run.subagents || []).push(sub)
   if (run.subagents.length > 12) run.subagents.shift()
 }
+const SESSION_WAITS = new Set(['startup', 'resume', 'clear'])
+// A timeout only meant Map heard nothing. Hearing from the run again undoes it, and
+// the event decides the rest: left ended, a run in the middle of a turn would read idle.
+function wakeRun(run) {
+  if (run.timedOut) { run.timedOut = false; run.ended = false }
+}
 function handleHookEvent(ev) {
   const cwd = ev.cwd || ''
   if (!inRepo(cwd)) return false
@@ -288,9 +294,10 @@ function handleHookEvent(ev) {
   run.lastEventAt = run.hookAt = Date.now()
   stateDirty = true
   const kind = ev.hook_event_name
-  run.timedOut = false
+  wakeRun(run)
   run.interrupted = false
-  if (kind === 'SessionStart') run.ended = false
+  // Opening, resuming or clearing leaves the session waiting for a prompt; compacting happens inside a turn.
+  if (kind === 'SessionStart') { run.ended = SESSION_WAITS.has(ev.source); run.sessionEnded = false }
   else if (kind === 'Stop' || kind === 'SessionEnd') { run.ended = true; run.sessionEnded = kind === 'SessionEnd'; run.currentTool = null }
   else if (kind === 'PreToolUse') {
     run.ended = false
@@ -321,7 +328,7 @@ const logRun = (meta, e, agent, source) => ({ id: meta.id, agent, provider: agen
 function applyLogEffect(run, meta, e) {
   if (meta.limited) run.historyLimited = true
   run.lastEventAt = Math.max(run.lastEventAt, e.at)
-  run.timedOut = false
+  wakeRun(run)
   stateDirty = true
   if (e.kind === 'turn-start') { run.ended = false; run.interrupted = false; run.sessionEnded = false }
   else if (e.kind === 'turn-end' || e.kind === 'interrupted') { run.ended = true; run.interrupted = e.kind === 'interrupted'; run.currentTool = null }
@@ -351,11 +358,18 @@ function applyCodexEffect(meta, e) {
 // session id, so hook-only facts like terminalId are kept. Hooks are live and
 // carry more, so a log row only counts if it is newer than the last hook heard:
 // the log fills in for a daemon that was down, or hooks that are not installed.
-// Only the log says a sub-agent went to the background or finished there.
+// Only the log says a sub-agent went to the background or finished there. Only the
+// log reports a prompt or an interruption too, and a hook is stamped when it arrives,
+// after the relay started up, so one fired just before such a row can look newer.
+const RELAY_LAG_MS = 2000
+function hookCovers(known, e) {
+  if (!known?.hookAt || e.at > known.hookAt) return false
+  if (e.kind === 'subagent-detached' || e.kind === 'subagent-end') return false
+  return !((e.kind === 'interrupted' || e.kind === 'turn-start') && known.hookAt - e.at < RELAY_LAG_MS)
+}
 function applyClaudeEffect(meta, e) {
   const known = runs[meta.id]
-  const logOnly = e.kind === 'subagent-detached' || e.kind === 'subagent-end'
-  if (known?.hookAt && e.at <= known.hookAt && !logOnly) return
+  if (hookCovers(known, e)) return
   const run = known || (runs[meta.id] = logRun(meta, e, 'claude', 'claude-log'))
   if (run.source === 'hook') run.source = BOTH_SOURCES
   if (meta.startedAt && meta.startedAt < run.startedAt) run.startedAt = meta.startedAt
