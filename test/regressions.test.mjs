@@ -50,7 +50,7 @@ describe('starting up', () => {
     child.stdout.on('data', c => out += c)
     await until(() => out.includes('localhost:'), 'the banner')
     await new Promise(r => setTimeout(r, 300))
-    child.kill()
+    await new Promise(r => { child.once('exit', r); child.kill() })
     blocker.close()
     assert.equal(out.match(/agenttrail ·/g).length, 1, out)
   })
