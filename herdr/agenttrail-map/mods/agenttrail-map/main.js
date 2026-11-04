@@ -1,19 +1,24 @@
 // Prototype: Agenttrail Map drawn natively in Herdr. Docks as a side panel, expands to a
-// full view. Read-only. See graph.js for the layout, ported from the page.
+// full view, and follows the repo of the focused terminal. Read-only: the only thing it
+// starts is a Map terminal, when asked. See graph.js for the layout, ported from the page.
 
 import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { appHome, focused, layout, nextCommand, panes, props, run, settings, setShared, shared, spaces } from "herdr";
+import { appHome, exec, focused, home, layout, nextCommand, panes, props, run, settings, setShared, shared, spaces } from "herdr";
 import * as fs from "fs/promises";
-import { Feed, POLL_MS, PORT_BASE } from "./feed.js";
+import { Feed, POLL_MS, PORT_BASE, focusFolder, repoName } from "./feed.js";
 import { REGION_HEAD, REGION_X, REGION_Y, ago, boardEdges, boardLayout, cardAgents, hostOf, kids, liveCard, statusLabel, taskDetails, taskIsOpen, touched } from "./graph.js";
 
 const MOD = "agenttrail-map";
 const ASSET = `mods/${MOD}`;
 const TAB = "Map"; // the expanded tab's name, how a docked copy finds it again
 const VIEW = `${MOD}.view`; // shared: the view handed between the panel and its tab
+const FOLDER = `${MOD}.folder`; // shared: the last terminal folder, for a copy that has focus itself
+const START_COMMAND = ["npx", "-y", "agenttrail@latest"];
+const START_WAIT_MS = 60000; // a first npx download takes a while; past this, offer the button again
 const NARROW = 560; // below this the whole graph is unreadable, so open on one card
 const SIDE_DOCK = 1040; // below this a run dock at the top right would sit on a centred card
+const AWAY_H = 30; // the strip saying a Map was picked by hand
 const SANS = "Geist";
 const MONO = "Geist Mono";
 const DOT = 24; // Map's background dots: fixed to the screen, they neither pan nor zoom
@@ -31,6 +36,12 @@ const MARK = { claude: "claude", codex: "codex", chatgpt: "codex", openai: "code
 const SOURCE = { hook: "hooks", "claude-log": "local log", "codex-log": "local log", "hook+claude-log": "hooks + log" };
 
 const lit = () => settings()?.dark === false;
+const shortPath = (p) => { const h = home(); return h && p?.startsWith(`${h}/`) ? `~${p.slice(h.length)}` : p ?? ""; };
+const hasCards = (b) => Boolean(b?.plan.some((n) => n.level === "component"));
+const gitRoot = async (cwd) => {
+  const git = await exec("git", ["rev-parse", "--show-toplevel"], { cwd });
+  return git.code === 0 ? git.stdout.trim() : null;
+};
 const agentColor = (c, name) => {
   const k = String(name).toLowerCase();
   if (["codex", "chatgpt", "openai"].includes(k)) return c.openai;
@@ -56,16 +67,19 @@ export default class AgenttrailMap extends View {
     this.ui = { open: new Set(), closed: new Set(), openTasks: new Set(), closedTasks: new Set() };
     this.press = null;
     this.stats = { renders: 0, totalMs: 0, maxMs: 0, moves: 0, wheels: 0, worstNarrow: 0, worstFull: 0 };
-    this.feed = new Feed({ fetch: (url) => fetch(url), sleep: (ms) => this.sleep(ms), base: p.portBase ?? PORT_BASE, port: p.port ?? null, folder: () => focused()?.cwd ?? null });
+    this.command = p.command ?? START_COMMAND;
+    this.starting = new Set();
+    this.feed = new Feed({ fetch: (url) => fetch(url), sleep: (ms) => this.sleep(ms), root: gitRoot, folder: () => this.here(), base: p.portBase ?? PORT_BASE, port: p.port ?? null, eager: () => this.starting.size > 0 });
     cx.spawn(async (cx) => {
       this.sleep = (ms) => cx.sleep(ms);
       for (;;) {
         const changed = await this.feed.tick();
-        if (changed) this.reshape();
+        if (this.feed.at && this.feed.at !== shared(FOLDER)) setShared(FOLDER, this.feed.at);
+        if (changed) this.shown();
         // Ages ("13s") and the 60s live window move with the clock, so a board with
         // recent work redraws at the poll rate, not once a second as the page does.
         if (changed || this.isLive()) cx.notify();
-        await cx.sleep(POLL_MS);
+        await Promise.race([cx.sleep(POLL_MS), new Promise((wake) => { this.wake = wake; })]);
       }
     });
     cx.spawn(async (cx) => {
@@ -85,14 +99,42 @@ export default class AgenttrailMap extends View {
     if (this.debug) cx.spawn(async (cx) => {
       for (;;) {
         await cx.sleep(500);
-        await fs.writeFile(`${appHome()}/map-stats-${this.uid}.json`, JSON.stringify({ ...this.stats, host: this.host(), auto: this.auto, centre: this.size && this.geo ? this.view() : null, zoom: this.zoom, pan: this.pan, size: this.size, at: Date.now() }));
+        await fs.writeFile(`${appHome()}/map-stats-${this.uid}.json`, JSON.stringify({ ...this.stats, state: this.feed.state, host: this.host(), auto: this.auto, centre: this.size && this.geo ? this.view() : null, zoom: this.zoom, pan: this.pan, size: this.size, at: Date.now() }));
       }
+    });
+  }
+
+  // Render runs on every focus change, so this is the follow: no polling of Herdr's data.
+  here() {
+    return focusFolder(focused(), spaces(), shared(FOLDER) ?? null);
+  }
+
+  // A different Map is a different world: its cards start fresh, not at the last one's zoom.
+  shown() {
+    if (this.feed.port !== this.mapPort) {
+      this.mapPort = this.feed.port;
+      this.ui = { open: new Set(), closed: new Set(), openTasks: new Set(), closedTasks: new Set() };
+      Object.assign(this, { unfolded: false, placed: false, auto: true, zoom: 1 });
+    }
+    this.reshape();
+  }
+
+  // Map outlives this view in a terminal of its own, as the list panel's Start does.
+  startMap(repo, cx) {
+    this.starting.add(repo);
+    run("terminal.open", { argv: [...this.command, repo, "--no-open"], folder: repo, place: "tab", name: "Agenttrail Map" });
+    this.wake?.();
+    cx.notify();
+    cx.spawn(async (cx) => {
+      await cx.sleep(START_WAIT_MS);
+      this.starting.delete(repo);
+      cx.notify();
     });
   }
 
   isLive() {
     const b = this.feed.board;
-    return Boolean(b && (b.plan.some((n) => n.level === "component" && n.touchedAt && Date.now() - n.touchedAt < 120000) || (b.runs ?? []).some((r) => !r.ended)));
+    return Boolean(b && (Date.now() - (b.activity?.at ?? 0) < 120000 || b.plan.some((n) => n.level === "component" && n.touchedAt && Date.now() - n.touchedAt < 120000) || (b.runs ?? []).some((r) => !r.ended)));
   }
 
   // Everything that does not depend on pan: done again only when the board, an open
@@ -101,7 +143,7 @@ export default class AgenttrailMap extends View {
     const b = this.feed.board;
     this.geo = null;
     this.edgeCache = null;
-    if (!b) return;
+    if (!hasCards(b)) return;
     const now = Date.now();
     const L = boardLayout(b, this.ui, now);
     const width = REGION_X + L.width + 80, height = REGION_Y + L.height + REGION_HEAD + 80;
@@ -173,7 +215,7 @@ export default class AgenttrailMap extends View {
     const tabs = spaces().find((s) => s.id === f?.space)?.tabs ?? [];
     const open = tabs.find((t) => t.name === TAB && t.panes === 1 && panes().some((p) => p.tab === t.id && p.mod === MOD));
     if (open) return run("tab.select", { id: open.id });
-    return run("tab.new", { name: TAB, mod: MOD, props: { expanded: true, from: f?.tab ?? null, port: this.feed.port, debug: this.debug || undefined } });
+    return run("tab.new", { name: TAB, mod: MOD, props: { ...props(), expanded: true, from: f?.tab ?? null } });
   }
 
   // ---- what the view shows.
@@ -253,7 +295,7 @@ export default class AgenttrailMap extends View {
   }
 
   headH() {
-    return this.narrow() ? 44 : 64;
+    return (this.narrow() ? 44 : 64) + (this.feed.state.away ? AWAY_H : 0);
   }
 
   // The stage changed under a view that is already placed: its middle stays its middle,
@@ -534,20 +576,94 @@ export default class AgenttrailMap extends View {
       .children(list.map((r) => this.runCard(c, b, r, now)));
   }
 
+  // What is on screen, in words, whatever the state: never a repo without its name.
+  title(b) {
+    const s = this.feed.state;
+    if (b) return b.project;
+    return s.kind === "off" ? repoName(s.repo) : s.kind === "plain" ? "No repo" : "Agenttrail Map";
+  }
+
+  subtitle() {
+    const s = this.feed.state;
+    if (this.feed.fixed) return `Port ${this.feed.fixed}`;
+    return s.repo ? shortPath(s.repo) : "Follows the focused terminal";
+  }
+
   header(c, b, now) {
     const working = b?.activity && now - b.activity.at < 60000;
     const narrow = this.narrow();
     const host = this.host();
     const big = this.isExpanded(host);
-    return h_flex().h(this.headH()).px(narrow ? 12 : 24).gap(narrow ? 8 : 10).items_center().flex_none().bg(c.bg).border_b(1).border_color(c.hover)
+    return h_flex().h(narrow ? 44 : 64).px(narrow ? 12 : 24).gap(narrow ? 8 : 10).items_center().flex_none().bg(c.bg).border_b(1).border_color(c.hover)
       .child(image(`${ASSET}/mark-${lit() ? "light" : "dark"}.svg`).w(narrow ? 22 : 28).h(narrow ? 22 : 28).flex_none())
-      .child(v_flex().min_w(0).child(div().truncate().text_size(14).font_weight(600).text_color(c.text).child(b?.project ?? "agenttrail"))
-        .when(!narrow, (el) => el.child(div().text_size(12).text_color(c.dim).child("workspace / PLAN.md"))))
-      .child(div().flex_1())
+      .child(v_flex().flex_1().min_w(0).child(div().truncate().text_size(14).font_weight(600).text_color(c.text).child(this.title(b)))
+        .when(!narrow, (el) => el.child(div().truncate().text_size(12).text_color(c.dim).child(this.subtitle()))))
       .when(Boolean(b), (el) => el.child(h_flex().flex_none().h(24).px(8).gap(6).items_center().rounded(8).border(1).border_color(c.line).text_size(12).text_color(working ? c.success : c.dim)
         .child(div().w(6).h(6).rounded(6).bg(working ? c.success : c.faint))
-        .child(working ? (narrow ? `${ago(b.activity.at, now)} ago` : `Working · ${ago(b.activity.at, now)} ago`) : narrow ? "Live" : "Plan is live")))
+        .child(working ? (narrow ? `${ago(b.activity.at, now)} ago` : `Working · ${ago(b.activity.at, now)} ago`) : !hasCards(b) ? "Watching" : narrow ? "Live" : "Plan is live")))
       .when(host.kind !== "lone", (el) => el.child(this.tool(c, "size", svg(`${ASSET}/${big ? "collapse" : "expand"}.svg`).w(14).h(14), (_e, cx) => { this.toggleSize(); cx.notify(); })));
+  }
+
+  away(c) {
+    const repo = repoName(this.feed.state.away);
+    return h_flex().id("away").h(AWAY_H).px(this.narrow() ? 12 : 24).gap(8).items_center().flex_none().bg(c.surface).border_b(1).border_color(c.hover).text_size(12)
+      .child(div().flex_1().min_w(0).truncate().text_color(c.dim).child(`Not your terminal's repo, ${repo}`))
+      .child(div().id("back").flex_none().text_color(c.accent).cursor_pointer().hover((s) => s.text_color(c.text)).child("Back")
+        .on_click((_e, cx) => { this.feed.back(); this.wake?.(); cx.notify(); }));
+  }
+
+  button(c, id, text, action) {
+    return div().id(id).h(32).px(12).flex().flex_none().items_center().rounded(8).border(1).border_color(c.accent).text_size(13).font_weight(600).text_color(c.accent)
+      .cursor_pointer().hover((s) => s.bg(c.hover)).on_click(action).child(text);
+  }
+
+  // Other Maps are things to switch to, never something shown by default.
+  others(c, list) {
+    return v_flex().mt(20).gap(2).child(div().pb(4).text_size(11).font_family(MONO).font_weight(500).text_color(c.faint).child("RUNNING ELSEWHERE"))
+      .children(list.map((m) => h_flex().id(`map-${m.port}`).h(36).px(8).gap(8).items_center().rounded(8).cursor_pointer().hover((s) => s.bg(c.hover))
+        .on_click((_e, cx) => { this.feed.choose(m.port); this.wake?.(); cx.notify(); })
+        .child(div().flex_none().text_size(13).font_weight(600).text_color(c.text).child(m.project))
+        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(c.faint).child(shortPath(m.repoPath)))
+        .child(div().flex_none().text_size(12).text_color(c.accent).child("Show"))));
+  }
+
+  notice(c, s) {
+    const repo = repoName(s.repo);
+    const words = {
+      scanning: ["Scanning for Map…", null],
+      none: ["No terminal in focus", "Click a terminal and Map shows its repo."],
+      plain: ["Not in a git repo", `${shortPath(s.repo)} isn't inside one. Map follows the repo of the focused terminal.`],
+      off: [`Map isn't running for ${repo}`, null],
+      gone: [`Map isn't answering on port ${s.port}`, null],
+    }[s.kind];
+    const start = (_e, cx) => this.startMap(s.repo, cx);
+    return v_flex().id("notice").size_full().min_h(0).p(this.narrow() ? 16 : 24).overflow_y_scrollbar()
+      .child(div().text_size(s.kind === "scanning" ? 13 : 15).font_weight(s.kind === "scanning" ? 400 : 600).text_color(s.kind === "scanning" ? c.dim : c.text).child(words[0]))
+      .when(Boolean(words[1]), (el) => el.child(div().mt(6).text_size(13).text_color(c.dim).child(words[1])))
+      .when(s.kind === "off", (el) => el.child(h_flex().mt(14).child(this.starting.has(s.repo)
+        ? div().h(32).flex().items_center().text_size(13).text_color(c.dim).child("Starting…")
+        : this.button(c, "start", "Start Map here", start))))
+      .when(s.others.length > 0, (el) => el.child(this.others(c, s.others)));
+  }
+
+  // A real Map with no plan: what the page shows there, its runs and the files it saw.
+  noPlan(c, b, now) {
+    const runs = [...(b.runs ?? [])].sort((a, r) => r.startedAt - a.startedAt).slice(0, 4);
+    const files = (b.recentActivity ?? []).slice(0, 8);
+    const label = (text) => div().mt(20).pb(6).text_size(11).font_family(MONO).font_weight(500).text_color(c.faint).child(text);
+    const quiet = (text) => div().text_size(13).text_color(c.dim).child(text);
+    return v_flex().id("no-plan").size_full().min_h(0).p(this.narrow() ? 16 : 24).overflow_y_scrollbar()
+      .child(v_flex().w_full().max_w(640).flex_none()
+        .child(div().text_size(15).font_weight(600).text_color(c.text).child(`Watching ${b.project}`))
+        .child(div().mt(6).text_size(13).text_color(c.dim).child("The component map needs a plan: run npx agenttrail init in this repo."))
+        .child(label("SESSIONS"))
+        .child(v_flex().gap(8).children(runs.map((r) => this.runCard(c, b, r, now))))
+        .when(!runs.length, (el) => el.child(quiet("No agent sessions seen yet.")))
+        .child(label("RECENT FILES"))
+        .children(files.map((a) => h_flex().h(24).gap(8).items_center().text_size(12).font_family(MONO)
+          .child(div().flex_1().min_w(0).truncate().text_color(c.soft).child(`${a.file}${a.n > 1 ? ` ×${a.n}` : ""}`))
+          .child(div().flex_none().text_color(c.faint).child(ago(a.at, now)))))
+        .when(!files.length, (el) => el.child(quiet("Waiting for the first file write."))));
   }
 
   canvas(c, b, now) {
@@ -583,10 +699,11 @@ export default class AgenttrailMap extends View {
     this.parts = {};
     this.shed = 0;
     this.takeView();
+    if (!this.feed.fixed && this.here() !== this.feed.at) this.wake?.();
     const c = lit() ? LIGHT : DARK;
     const b = this.feed.board;
     const now = Date.now();
-    const ready = Boolean(b && this.geo && this.size);
+    const ready = Boolean(hasCards(b) && this.geo && this.size);
     const root = v_flex().id("root").size_full().min_h(0).bg(c.bg).font_family(SANS)
       .on_size_change((size, cx) => {
         if (size.width === this.size?.width && size.height === this.size?.height) return;
@@ -594,9 +711,10 @@ export default class AgenttrailMap extends View {
         cx.notify();
       })
       .child(this.header(c, b, now))
+      .when(Boolean(this.feed.state.away), (el) => el.child(this.away(c)))
       .child(div().id("canvas").relative().flex_1().min_h(0).overflow_hidden().bg(c.bg)
         .when(Boolean(this.press), (el) => el.cursor_grabbing())
-        .when(!this.press, (el) => el.cursor_grab())
+        .when(ready && !this.press, (el) => el.cursor_grab())
         .on_mouse_down("left", (e, cx) => { this.press = { x: e.position.x, y: e.position.y, px: this.pan.x, py: this.pan.y }; cx.notify(); })
         .on_mouse_move((e, cx) => {
           if (!this.press) return;
@@ -616,9 +734,10 @@ export default class AgenttrailMap extends View {
           } else this.pan = { x: this.pan.x + e.delta.x, y: this.pan.y + e.delta.y };
           cx.notify();
         })
-        .when(Boolean(this.size), (el) => { const g = el.child(this.grid(c)); this.parts.grid = Date.now() - this.t0; return g; })
+        .when(ready, (el) => { const g = el.child(this.grid(c)); this.parts.grid = Date.now() - this.t0; return g; })
         .when(ready, (el) => el.children(this.canvas(c, b, now)).child(this.tools(c, b, now)).child(this.runs(c, b, now)))
-        .when(!ready, (el) => el.child(div().absolute().left(24).top(24).text_size(13).text_color(c.dim).child("Looking for Map…"))));
+        .when(Boolean(b) && !hasCards(b), (el) => el.child(this.noPlan(c, b, now)))
+        .when(!b, (el) => el.child(this.notice(c, this.feed.state))));
     const ms = Date.now() - started;
     this.stats.renders += 1;
     this.stats.totalMs += ms;

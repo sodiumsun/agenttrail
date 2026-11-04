@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { Feed } from '../herdr/agenttrail-map/mods/agenttrail-map/feed.js'
+import { Feed, SCAN_MS, focusFolder, pickMap } from '../herdr/agenttrail-map/mods/agenttrail-map/feed.js'
 import { boardEdges, boardLayout, cardAgents, dockedIn, hostOf, liveCard } from '../herdr/agenttrail-map/mods/agenttrail-map/graph.js'
 import { freePortBase, startMap, stopAll, tempWorld } from './helpers.mjs'
 
@@ -89,11 +89,25 @@ describe('the Map prototype mod', () => {
   })
 
   test('the feed finds the Map for this folder and reports only real changes', async () => {
-    const feed = new Feed({ fetch: u => fetch(u), sleep: () => new Promise(() => {}), base: map.port, folder: () => path.join(world.repo, 'src') })
+    const feed = new Feed({ fetch: u => fetch(u), sleep: () => new Promise(() => {}), base: map.port, root: async () => world.repo, folder: () => path.join(world.repo, 'src') })
     assert.equal(await feed.tick(), true)
     assert.equal(feed.board.project, board.project)
+    assert.equal(feed.state.kind, 'map')
     assert.equal(feed.port, map.port)
     assert.equal(await feed.tick(), false)
+  })
+
+  test('a real Map on a repo with no plan is shown, not waited on', async () => {
+    const bare = tempWorld('')
+    const m = await startMap({ repo: bare.repo, home: bare.home, base: await freePortBase() })
+    const feed = new Feed({ fetch: u => fetch(u), sleep: () => new Promise(() => {}), base: m.port, root: async () => bare.repo, folder: () => bare.repo })
+    assert.equal(await feed.tick(), true)
+    assert.equal(feed.state.kind, 'map')
+    assert.deepEqual(feed.board.plan, [])
+    assert.equal(feed.board.hasPlan, false)
+    assert.ok('recentActivity' in feed.board && 'runs' in feed.board)
+    await m.stop()
+    bare.cleanup()
   })
 
   test('a narrow view opens where a live run is pinned, then the freshest edit, then the plan, else nothing', () => {
@@ -105,6 +119,195 @@ describe('the Map prototype mod', () => {
     assert.equal(liveCard({ plan, runs: [{ componentId: 'gone' }, { componentId: 'a', ended: true }] }, NOW), 'c')
     assert.equal(liveCard({ plan: [plan[0], c('b'), plan[3]], runs: [] }, NOW), 'a')
     assert.equal(liveCard({ plan: [c('b'), plan[3]] }, NOW), null)
+  })
+
+  describe('which Map a copy shows', () => {
+    const BASE = 7000
+    const A = { port: BASE, project: 'alpha', repoPath: '/w/alpha' }
+    const B = { port: BASE + 1, project: 'beta', repoPath: '/w/beta' }
+    const never = () => new Promise(() => {})
+    // A pretend machine: the Maps up now, and what each serves.
+    function machine(maps, { plan = [{ id: 'c', level: 'component' }] } = {}) {
+      const world = { maps, down: new Set(), hang: new Set(), asked: [] }
+      world.fetch = async (url) => {
+        const { port, pathname } = new URL(url)
+        world.asked.push(url)
+        const m = world.maps.find(x => x.port === Number(port))
+        if (world.hang.has(Number(port))) return never()
+        if (!m || world.down.has(m.port)) throw new Error('refused')
+        const body = pathname === '/panel' ? { app: 'agenttrail', ...m } : { project: m.project, plan, runs: [], now: Date.now() }
+        return { ok: true, json: async () => body }
+      }
+      return world
+    }
+    const roots = { '/w/alpha': '/w/alpha', '/w/alpha/src': '/w/alpha', '/w/beta': '/w/beta', '/w/gamma': '/w/gamma', '/w/alpha/inner': '/w/alpha/inner' }
+    const feedOn = (world, at, over = {}) => new Feed({ fetch: world.fetch, sleep: never, base: BASE, root: async f => roots[f] ?? null, folder: () => at.folder, ...over })
+
+    test('with no Map for this repo it shows nothing, and names the others', async () => {
+      const feed = feedOn(machine([B]), { folder: '/w/alpha' })
+      assert.equal(await feed.tick(), true)
+      assert.equal(feed.board, null)
+      assert.equal(feed.port, null)
+      assert.equal(feed.state.kind, 'off')
+      assert.equal(feed.state.repo, '/w/alpha')
+      assert.deepEqual(feed.state.others, [B])
+    })
+
+    test('focus moving to another repo re-picks, keeping the last board until the next is ready', async () => {
+      const at = { folder: '/w/alpha/src' }
+      const world = machine([A, B])
+      const feed = feedOn(world, at)
+      await feed.tick()
+      assert.equal(feed.board.project, 'alpha')
+      assert.equal(feed.state.repo, '/w/alpha')
+      at.folder = '/w/beta'
+      const before = world.fetch
+      let during
+      world.fetch = undefined
+      feed.fetch = async (url) => { during ??= feed.board?.project; return before(url) }
+      assert.equal(await feed.tick(), true)
+      assert.equal(during, 'alpha')
+      assert.equal(feed.board.project, 'beta')
+      assert.equal(feed.port, B.port)
+      assert.equal(await feed.tick(), false)
+    })
+
+    test('focus moving during a slow read is followed before the tick ends', async () => {
+      const at = { folder: '/w/alpha' }
+      const world = machine([A, B])
+      const feed = feedOn(world, at, { fetch: async (url) => { if (url.endsWith('/board-lite')) at.folder = '/w/beta'; return world.fetch(url) } })
+      await feed.tick()
+      assert.equal(feed.board.project, 'beta')
+    })
+
+    test('a known Map switches without a new scan; a Map started since is found by one', async () => {
+      const at = { folder: '/w/alpha' }
+      const world = machine([A, B])
+      const feed = feedOn(world, at)
+      await feed.tick()
+      at.folder = '/w/beta'
+      world.asked.length = 0
+      await feed.tick()
+      assert.deepEqual(world.asked, [`http://127.0.0.1:${B.port}/board-lite`])
+      const C = { port: BASE + 2, project: 'gamma', repoPath: '/w/gamma' }
+      world.maps = [A, B, C]
+      at.folder = '/w/gamma'
+      await feed.tick()
+      assert.equal(feed.board.project, 'gamma')
+    })
+
+    test('while off it scans now and then, and every tick when a start is under way', async () => {
+      let clock = 0, eager = false
+      const world = machine([])
+      const feed = feedOn(world, { folder: '/w/alpha' }, { now: () => clock, eager: () => eager })
+      await feed.tick()
+      world.asked.length = 0
+      clock = SCAN_MS - 1
+      await feed.tick()
+      assert.equal(world.asked.length, 0)
+      eager = true
+      world.maps = [A]
+      await feed.tick()
+      assert.equal(feed.state.kind, 'map')
+    })
+
+    test('one missed answer keeps the board; a stopped Map turns into off', async () => {
+      const world = machine([A])
+      const feed = feedOn(world, { folder: '/w/alpha' })
+      await feed.tick()
+      world.down.add(A.port)
+      assert.equal(await feed.tick(), false)
+      assert.equal(feed.board.project, 'alpha')
+      assert.equal(await feed.tick(), true)
+      assert.equal(feed.state.kind, 'off')
+      assert.equal(feed.board, null)
+    })
+
+    test('a folder outside any repo says so, with or without other Maps', async () => {
+      const feed = feedOn(machine([A]), { folder: '/w/loose' })
+      await feed.tick()
+      assert.equal(feed.state.kind, 'plain')
+      assert.equal(feed.state.repo, '/w/loose')
+      assert.deepEqual(feed.state.others, [A])
+    })
+
+    test('no terminal yet is its own state, not a Map picked at random', async () => {
+      const feed = feedOn(machine([A]), { folder: null })
+      await feed.tick()
+      assert.equal(feed.state.kind, 'none')
+      assert.equal(feed.board, null)
+    })
+
+    test('a port that never answers cannot stop a scan from resolving', async () => {
+      const world = machine([A, B])
+      world.hang.add(B.port)
+      const feed = feedOn(world, { folder: '/w/alpha' }, { sleep: async () => {} })
+      await feed.tick()
+      assert.notEqual(feed.state.kind, 'scanning')
+      const none = machine([])
+      none.hang.add(BASE)
+      const off = feedOn(none, { folder: '/w/alpha' }, { sleep: async () => {} })
+      await off.tick()
+      assert.equal(off.state.kind, 'off')
+    })
+
+    test('props.port stays a pin whatever has focus, and says when it stops answering', async () => {
+      const at = { folder: '/w/alpha' }
+      const world = machine([A, B])
+      const feed = feedOn(world, at, { port: B.port })
+      await feed.tick()
+      assert.equal(feed.board.project, 'beta')
+      at.folder = '/w/gamma'
+      assert.equal(await feed.tick(), false)
+      assert.equal(feed.board.project, 'beta')
+      world.down.add(B.port)
+      await feed.tick()
+      await feed.tick()
+      assert.equal(feed.state.kind, 'gone')
+      assert.equal(feed.state.port, B.port)
+      assert.ok(!world.asked.some(u => u.endsWith('/panel')))
+    })
+
+    test('a Map picked by hand lasts until focus changes repo, and says so', async () => {
+      const at = { folder: '/w/gamma' }
+      const feed = feedOn(machine([A, B]), at)
+      await feed.tick()
+      assert.equal(feed.state.kind, 'off')
+      feed.choose(B.port)
+      await feed.tick()
+      assert.equal(feed.board.project, 'beta')
+      assert.equal(feed.state.away, '/w/gamma')
+      feed.back()
+      await feed.tick()
+      assert.equal(feed.state.kind, 'off')
+      feed.choose(B.port)
+      await feed.tick()
+      at.folder = '/w/alpha'
+      await feed.tick()
+      assert.equal(feed.board.project, 'alpha')
+      assert.equal(feed.state.away, null)
+    })
+
+    test('the repo a folder belongs to decides, not which Map contains it', () => {
+      const parent = { port: 1, repoPath: '/w' }, sub = { port: 2, repoPath: '/w/alpha/pkg' }
+      assert.equal(pickMap([parent], '/w/alpha/src', '/w/alpha'), null)
+      assert.equal(pickMap([A, parent], '/w/alpha/src', '/w/alpha'), A)
+      assert.equal(pickMap([A, sub], '/w/alpha/pkg/x', '/w/alpha'), sub)
+      assert.equal(pickMap([A, sub], '/w/alpha/src', '/w/alpha'), A)
+      assert.equal(pickMap([A], '/w/alpha/inner', '/w/alpha/inner'), null)
+      assert.equal(pickMap([{ port: 3, repoPath: '/w/alphabet' }], '/w/alpha', '/w/alpha'), null)
+      assert.equal(pickMap([parent], '/w/loose', null), parent)
+      assert.equal(pickMap([A], null, null), null)
+      assert.equal(pickMap([A], '/link/to/alpha/src', '/w/alpha'), A)
+    })
+
+    test('focus on anything but a local terminal keeps the last folder', () => {
+      const spaces = [{ id: 's' }, { id: 'r', machine: 'vps' }]
+      assert.equal(focusFolder({ space: 's', terminal: 't1', cwd: '/w/alpha/' }, spaces, '/w/beta'), '/w/alpha')
+      assert.equal(focusFolder({ space: 's', terminal: null, pane: 'p', cwd: null }, spaces, '/w/beta'), '/w/beta')
+      assert.equal(focusFolder({ space: 'r', terminal: 't2', cwd: '/srv/app' }, spaces, '/w/beta'), '/w/beta')
+      assert.equal(focusFolder(null, spaces, null), null)
+    })
   })
 
   describe('where a copy lives', () => {
@@ -148,7 +351,15 @@ describe('the Map prototype mod', () => {
     const dir = path.join(ROOT, 'herdr', 'agenttrail-map', 'mods', 'agenttrail-map')
     for (const file of ['main.js', 'feed.js', 'graph.js']) {
       const text = fs.readFileSync(path.join(dir, file), 'utf8')
-      assert.ok(!/method:\s*["']POST|\bexec\(/.test(text), file)
+      assert.ok(!/method:\s*["']POST/.test(text), file)
+      for (const call of text.match(/\bexec\(.*/g) ?? []) assert.match(call, /^exec\("git", \["rev-parse", "--show-toplevel"\]/, file)
     }
+  })
+
+  test('the only command the mod sends that starts anything is the Map terminal', () => {
+    const text = fs.readFileSync(path.join(ROOT, 'herdr', 'agenttrail-map', 'mods', 'agenttrail-map', 'main.js'), 'utf8')
+    assert.deepEqual([...new Set(text.match(/\brun\("[a-z.]+"/g))].sort(), ['run("pane.zoom"', 'run("tab.close"', 'run("tab.new"', 'run("tab.select"', 'run("terminal.open"'])
+    assert.match(text, /START_COMMAND = \["npx", "-y", "agenttrail@latest"\]/)
+    assert.match(text, /\[\.\.\.this\.command, repo, "--no-open"\]/)
   })
 })
