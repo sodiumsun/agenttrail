@@ -176,6 +176,9 @@ files: [bin/**, public/**, test/**, herdr/**, .github/workflows/map.yml]
   by: claude
   from: agent
   tech: herdr/agenttrail/RECIPE.md in Herdr's six-part order; herdr/agenttrail/preview.png; herdr/README.md
+- [x] Fix what an independent review of the branch found {#runs-review-fixes}
+  by: claude
+  tech: test/regressions.test.mjs
 - [ ] List the panel on herdr.dev once its Map is on npm {#herdr-list}
   from: agent
   tech: publish a Map with /panel first; then main-branch merge and the herdr-mod repo topic; owner's call

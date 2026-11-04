@@ -13,6 +13,7 @@ const NARROW = 260;
 const CHAR_PX = 6.1; // of the 11.5px path line, near enough to fit it by length
 const TAG_COLOR = { reported: "done", observed: "accent", inferred: "working" };
 const START_COMMAND = ["npx", "-y", "agenttrail@latest"];
+const START_WAIT_MS = 60000; // a first npx download takes a while; past this, offer the button again
 
 const shortFolder = (folder, home) => (home && folder.startsWith(home) ? `~${folder.slice(home.length)}` : folder);
 
@@ -56,6 +57,9 @@ export default class Agenttrail extends View {
       const repo = git?.code === 0 ? git.stdout.trim() : folder;
       run("terminal.open", { argv: [...this.command, repo, "--no-open"], folder: repo, place: "tab", name: "Agenttrail Map" });
       this.poller.wake();
+      cx.notify();
+      await cx.sleep(START_WAIT_MS);
+      this.starting.delete(folder);
       cx.notify();
     });
   }

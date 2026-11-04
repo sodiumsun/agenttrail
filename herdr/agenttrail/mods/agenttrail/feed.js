@@ -53,16 +53,21 @@ export class Poller {
     this.scanned = false;
     this.next = 0;
     this.sig = "";
+    this.waiting = new Set(); // ports with a fetch still unanswered
   }
 
   list() {
     return [...this.boards.values()].sort((a, b) => String(a.project).localeCompare(String(b.project)) || a.port - b.port);
   }
 
-  // A fetch that never answers must not stall the round.
+  // A fetch that never answers must not stall the round, and Herdr's fetch has no
+  // timeout, so it stays open: never send another behind it. It counts as a miss.
   read(port) {
+    if (this.waiting.has(port)) return Promise.resolve(null);
+    this.waiting.add(port);
+    const answer = readBoard(this.fetch, port).finally(() => this.waiting.delete(port));
     const late = this.sleep(TIMEOUT_MS).then(() => null);
-    return Promise.race([readBoard(this.fetch, port), late]);
+    return Promise.race([answer, late]);
   }
 
   async round() {

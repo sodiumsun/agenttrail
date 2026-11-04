@@ -20,7 +20,7 @@ One column, normally 340px wide, in the theme's `chrome` background. Text is 12.
     4. when unlinked, 10.5px `dim`: `No terminal link`, `Terminal closed`, `Earlier session in this terminal` or `Can't tell which terminal`.
   - **Label**, 14px high, radius 4, `border` outline, 9.5px text: `reported` in `done`, `observed` in `accent`, `inferred` in `working`. Narrow: `R`, `O`, `I`, with the full word as a tooltip.
   - `3 older runs in the full map` in 10.5px `dim` under the rows when unlinked runs were folded away.
-- **Map off**: `Map isn't running` in 12px semibold `foreground` and `Start it in a repo to see what each agent touched.` in `muted`; then one line per folder with agents in it, with its agent count and `Start Map here` in `accent` (`Start ↗` when narrow; `Starting…` in `dim` once pressed); then an outlined `Show sample` button, 24px high. With no agents, the focused terminal's folder is offered.
+- **Map off**: `Map isn't running` in 12px semibold `foreground` and `Start it in a repo to see what each agent touched.` in `muted`; then one line per folder with agents in it, with its agent count and `Start Map here` in `accent` (`Start ↗` when narrow; `Starting…` in `dim` once pressed, for at most 60 seconds if no Map appears); then an outlined `Show sample` button, 24px high. With no agents, the focused terminal's folder is offered.
 - **Footer**, only when agents run elsewhere, `border` line above, 10.5px `dim`: `2 agents on other machines aren't shown. This version reads this computer only.`
 
 ## How it behaves
@@ -28,14 +28,15 @@ One column, normally 340px wide, in the theme's `chrome` background. Text is 12.
 - **Status**. A linked row shows Herdr's live status, drawn as in the shipped agents list: `working`, a 12px ring turning every 900ms in `working`; `blocked`, a `Needs you` badge in `blocked` (`!` when narrow); `done`, a 7px dot in `done`; `idle`, a 7px ring in `idle`. An unlinked row shows Map's status instead: active as working, idle as idle, or the words `Ended`, `Interrupted`, `Unknown` in `dim`. Map cannot know blocked or done, so an unlinked row never shows them.
 - **Order**. Within a repo, blocked, done, working, idle, interrupted, unknown, ended; newest first within each.
 - **Linking** a run to a terminal, in order:
-  1. A terminal id links exactly. If that terminal is gone the row reads `Terminal closed` and never falls back to the repo. Two sessions in one terminal: the newest owns it, the older reads `Earlier session in this terminal`.
+  1. A terminal id links exactly. If that terminal is gone the row reads `Terminal closed` and never falls back to the repo. Two sessions in one terminal: the newest owns it, the older reads `Earlier session in this terminal`. So does a run whose terminal now runs a different known program, and that agent stays free for the run that fits.
   2. With no id, a run active or idle in the last 30 minutes links by repo only when exactly one free local agent is in that repo, running the same program or an unknown one, and no other run wants that agent.
   3. Anything else stays unlinked. Two candidates either way round read `Can't tell which terminal`, on every run concerned.
+- **One row per session**. A session reported by two Maps shows once: on the inner repo when one is nested in the other, else where it was last heard.
 - **Rows that aren't runs**: an agent in a watched repo with no run yet shows `Nothing seen from this agent yet` and is clickable. Sub-agent runs get no row. Unlinked runs silent for over 30 minutes fold into the count.
 - **Click** a linked row: `agent.focus`, or `pane.focus` for a live terminal that reports no status. Unlinked rows and sample rows do nothing and have no hover.
 - **Open full map**: the system browser at the Map's `http://localhost:<port>`.
 - **Start Map here**: finds the folder's git root and opens a new tab named `Agenttrail Map` running `npx -y agenttrail@latest <repo> --no-open`. The panel notices the new Map by itself.
-- **Polling**: Herdr's own data is live and never polled. Every 3 seconds the panel asks the Maps it knows; every fifth round, or while it knows none, it scans ports 5330 to 5344. With no Map, the wait doubles from 3 to 30 seconds. **Start Map here** resets it. A Map must miss two rounds before its group goes, and its agents then move to the `Start Map here` list.
+- **Polling**: Herdr's own data is live and never polled. Every 3 seconds the panel asks the Maps it knows; every fifth round, or while it knows none, it scans ports 5330 to 5344. With no Map, the wait doubles from 3 to 30 seconds. **Start Map here** resets it. A Map must miss two rounds before its group goes, and its agents then move to the `Start Map here` list. A port that hasn't answered gets no second fetch and counts as a miss.
 - **Redraws** happen only when a feed really changed, not because its clock moved. Nothing moves but the working ring.
 - Keys and hovers beyond the above: none.
 
@@ -44,7 +45,7 @@ One column, normally 340px wide, in the theme's `chrome` background. Text is 12.
 - **One mod**, `mods/agenttrail/`, no layout. `mod.json`: `{ "place": "right", "size": 340, "title": "Agenttrail" }`. Beside a terminal in any tab: `pane.split {direction: "right", mod: "agenttrail"}`.
 - `main.js`: the view (`gpui-kit` `View`, `div`, `image`, `svg`; `gpui-base` `h_flex`, `v_flex`). One `cx.spawn` loop for the copy's life: `poller.tick()`, then `cx.sleep(3000)`. Width from `on_size_change` on the root. Colours from `theme()`.
 - `feed.js`: `readBoard`, `Poller`, `delayAfter`. No Herdr imports; `fetch`, `sleep` and `now` are passed in.
-- `link.js`: `linkRuns`, `repoOf`. Pure.
+- `link.js`: `linkRuns`, `onePerRun`, `repoOf`. Pure.
 - `view.js`: `buildView`, `pathText`. Pure.
 - `sample.js`: `SCENARIOS` (`all`, `off`, `old`, `noplan`, `nohooks`, `working`, `blocked`, `done`, `idle`, `nolink`, `shared`, `remote`). Made-up worlds that go through the same `buildView`.
 - `mark-dark.svg`, `mark-light.svg`: the Agenttrail mark, unchanged. It also draws `icons/claude.svg`, `icons/codex.svg` and `mods/workspace-chrome/spinner.svg` from the app.

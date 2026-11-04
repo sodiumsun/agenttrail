@@ -23,6 +23,20 @@ const sameProgram = (run, agent) => {
   return !key || key === "agent" || key === "program" || key === run.provider;
 };
 
+// The same session can reach two Maps: a repo nested in another, two names for one
+// folder, a session that moved. It belongs to one, as an agent's folder does: the
+// inner repo, else where it was last heard.
+export function onePerRun(boards) {
+  const home = new Map(); // run id -> { board, run }
+  for (const board of boards) for (const run of board.runs ?? []) {
+    const held = home.get(run.id);
+    const root = norm(board.repoPath), heldRoot = held ? norm(held.board.repoPath) : "";
+    const nested = held && (inside(root, heldRoot) || inside(heldRoot, root));
+    if (!held || (nested ? root.length > heldRoot.length : run.lastEventAt > held.run.lastEventAt)) home.set(run.id, { board, run });
+  }
+  return boards.map((board) => ({ ...board, runs: (board.runs ?? []).filter((run) => home.get(run.id).board === board) }));
+}
+
 export const runKey = (board, run) => `${board.port}:${run.id}`;
 
 // Returns { links: Map(runKey -> link), contested, claimed }: sets of addresses.
@@ -48,7 +62,7 @@ export function linkRuns({ boards, agents, terminals, panes, now }) {
     const key = runKey(board, run);
     const agent = byAddress.get(run.terminalId) ?? null;
     if (!agent && !live.has(run.terminalId)) links.set(key, { address: null, why: "closed" });
-    else if (owners.get(run.terminalId) !== run) links.set(key, { address: null, why: "replaced" });
+    else if (owners.get(run.terminalId) !== run || (agent && !sameProgram(run, agent))) links.set(key, { address: null, why: "replaced" });
     else {
       links.set(key, { address: run.terminalId, agent, how: "terminal" });
       claimed.add(run.terminalId);

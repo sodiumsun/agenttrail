@@ -1,6 +1,6 @@
 // Turns Map boards and Herdr's agents into the rows the panel draws. Pure.
 
-import { RECENT_MS, isRemote, linkRuns, norm, repoOf, runKey } from "./link.js";
+import { RECENT_MS, isRemote, linkRuns, norm, onePerRun, repoOf, runKey } from "./link.js";
 
 // Most urgent first; matches Herdr's blocked > done > working > idle.
 const RANK = { blocked: 6, done: 5, working: 4, idle: 3, interrupted: 2, unknown: 1, ended: 0 };
@@ -99,7 +99,8 @@ function boardNote(board, rows, older) {
   return notes.join(" ") || null;
 }
 
-export function buildView({ boards, agents, terminals = [], panes = [], now, fallbackFolder = null, remoteExtra = 0 }) {
+export function buildView({ boards: feeds, agents, terminals = [], panes = [], now, fallbackFolder = null, remoteExtra = 0 }) {
+  const boards = onePerRun(feeds);
   const { links, contested, claimed } = linkRuns({ boards, agents, terminals, panes, now });
   const paneOf = new Map(panes.map((p) => [p.pane, p]));
   const roots = boards.map((b) => b.repoPath);

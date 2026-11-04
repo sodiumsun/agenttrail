@@ -216,3 +216,67 @@ describe('finding logs', () => {
   })
 })
 
+describe('the panel', () => {
+  const NOW = 1_000_000
+  const run = (id, extra = {}) => ({ id, agent: 'claude', provider: 'claude', status: 'active', terminalId: null, parentId: null, cwd: '/w/app/sub', lastEventAt: NOW - 1000, task: null, tool: null, path: [], evidence: { task: 'unknown' }, ...extra })
+  const board = (port, repoPath, runs) => ({ port, project: path.basename(repoPath), repoPath, url: `http://localhost:${port}`, hasPlan: true, sources: { hooks: true }, runs })
+  const agent = (address, key, cwd = '/w/app/sub') => ({ address, pane: `p-${address}`, cwd, status: 'working', tab_name: '1', title: 'x', space_name: 'w', program: { key, name: key } })
+  const view = (boards, agents) => buildView({ boards, agents, now: NOW, terminals: agents.map(a => ({ address: a.address, state: 'live' })), panes: agents.map(a => ({ pane: a.pane, cwd: a.cwd })) })
+  const rows = v => v.groups.flatMap(g => g.rows.map(r => ({ group: g.project, key: r.key, address: r.address, unlinked: r.unlinked })))
+
+  test('a session seen by a Map and by one nested inside it is one row, on the inner repo', () => {
+    const v = view([board(5330, '/w/app', [run('s', { terminalId: 't1' })]), board(5331, '/w/app/sub', [run('s', { terminalId: 't1' })])], [agent('t1', 'claude')])
+    assert.deepEqual(rows(v), [{ group: 'sub', key: '5331:s', address: 't1', unlinked: null }])
+  })
+  test('two Maps on one real folder show a session once', () => {
+    const v = view([board(5330, '/w/app/sub', [run('s')]), board(5331, '/w/app/sub', [run('s')])], [])
+    assert.equal(rows(v).length, 1)
+  })
+  test('a session that moved between sibling repos stays where it went', () => {
+    const v = view([board(5330, '/w/one', [run('s', { lastEventAt: NOW - 9000 })]), board(5331, '/w/two', [run('s', { lastEventAt: NOW - 1000 })])], [])
+    assert.deepEqual(rows(v).map(r => r.group), ['two'])
+  })
+  test('a terminal now running another program is not that run', () => {
+    const v = view([board(5330, '/w/app/sub', [run('old', { terminalId: 't1', lastEventAt: NOW - 2000 }), run('new', { provider: 'codex', agent: 'codex' })])], [agent('t1', 'codex')])
+    const byKey = Object.fromEntries(rows(v).map(r => [r.key, r]))
+    assert.equal(byKey['5330:old'].address, null)
+    assert.equal(byKey['5330:old'].unlinked, 'Earlier session in this terminal')
+    assert.equal(byKey['5330:new'].address, 't1')
+  })
+  test('a port that never answers gets one fetch, not one per round', async () => {
+    const calls = []
+    const poller = new Poller({
+      fetch: url => { calls.push(url); return url.includes(':5331/') ? new Promise(() => {}) : Promise.reject(new Error('refused')) },
+      sleep: () => Promise.resolve(), now: () => 0, base: 5330,
+    })
+    for (let i = 0; i < 6; i++) await poller.round()
+    assert.equal(calls.filter(u => u.includes(':5331/')).length, 1)
+    assert.equal(calls.filter(u => u.includes(':5330/')).length, 6)
+  })
+  test('Start Map here can be pressed again when no Map appears', async () => {
+    const dir = tempDir('mod')
+    const mod = path.join(path.dirname(BIN), '..', 'herdr', 'agenttrail', 'mods', 'agenttrail')
+    fs.writeFileSync(path.join(dir, 'stub.mjs'), `
+      export class View {}
+      export const div = 0, image = 0, svg = 0, v_flex = 0, h_flex = 0, agents = 0, focused = 0, home = 0, notify = 0, panes = 0, settings = 0, spaces = 0, terminals = 0, theme = 0, window = 0
+      export const props = () => ({ sample: 'off' })
+      export const exec = async () => ({ code: 1, stdout: '' })
+      export const run = () => {}
+    `)
+    const stub = pathToFileURL(path.join(dir, 'stub.mjs')).href
+    const source = fs.readFileSync(path.join(mod, 'main.js'), 'utf8')
+      .replace(/from "(gpui-kit|gpui-base|herdr)"/g, `from "${stub}"`)
+      .replace(/from "\.\/(.+?)"/g, (_, f) => `from "${pathToFileURL(path.join(mod, f)).href}"`)
+    fs.writeFileSync(path.join(dir, 'main.mjs'), source)
+    const { default: Panel } = await import(pathToFileURL(path.join(dir, 'main.mjs')).href)
+    fs.rmSync(dir, { recursive: true, force: true })
+    const panel = new Panel()
+    panel.init({}, {})
+    const tasks = []
+    const cx = { notify() {}, sleep: async () => {}, spawn: fn => tasks.push(fn(cx)) }
+    panel.startMap('/w/app', cx)
+    assert.ok(panel.starting.has('/w/app'))
+    await Promise.all(tasks)
+    assert.ok(!panel.starting.has('/w/app'), 'npx failed and no Map came: the button must come back')
+  })
+})
