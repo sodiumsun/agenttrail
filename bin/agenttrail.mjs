@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import crypto from 'node:crypto'
 import { applyTaskEffect, claudeTaskEffect, clean } from './lib/tasks.mjs'
-import { hasMapRelay } from './lib/hooks.mjs'
+import { hasMapRelay, repointRelays } from './lib/hooks.mjs'
 import { ClaudeLogReader, SUBAGENT_TOOL, subagentName, toolDetail as describeTool } from './lib/claude.mjs'
 import { CodexLogReader } from './lib/codex.mjs'
 import { panelFeed } from './lib/panel.mjs'
@@ -423,8 +423,9 @@ function saveState() {
   if (!stateDirty) return
   stateDirty = false
   try {
-    fs.mkdirSync(path.dirname(stateFile), { recursive: true })
-    fs.writeFileSync(stateFile, JSON.stringify({ repoPath: repo, port, activity, recentActivity, compTouched, compRecent, runs, fileHeat, cycles, codexCursors, claudeCursors }))
+    fs.mkdirSync(path.dirname(stateFile), { recursive: true, mode: 0o700 })
+    fs.writeFileSync(stateFile, JSON.stringify({ repoPath: repo, port, activity, recentActivity, compTouched, compRecent, runs, fileHeat, cycles, codexCursors, claudeCursors }), { mode: 0o600 })
+    fs.chmodSync(stateFile, 0o600) // it holds the start of commands, and earlier versions left it readable
   } catch {}
 }
 loadState()
@@ -767,7 +768,7 @@ const server = http.createServer((req, res) => {
     } catch {}
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(out.slice(0, 15)))
   } else if (u.pathname === '/setup' && req.method === 'POST') {
-    init().then(() => {
+    init({ ask: false }).then(() => { // pressing Set up was the answer; a prompt in the terminal would hang the request
       planText = safeRead(planPath); parsed = parsePlan(planText); rebuildMatchers(); planMtime = statMtime(planPath)
       hooksInstalledCache.at = 0
       broadcast()
@@ -874,7 +875,7 @@ function listenWithFallback(tries = 20) {
     if (e.code === 'EADDRINUSE' && tries > 0) { port += 1; listenWithFallback(tries - 1) }
     else { console.error('could not bind a port:', e.message); process.exit(1) }
   })
-  server.listen(port, '127.0.0.1', onListen)
+  server.listen(port, '127.0.0.1')
 }
 const BACKFILL_PROMPT = 'Read the "agenttrail plan convention" section in CLAUDE.md or AGENTS.md. Then study this repo in trust order — the code and directory layout first (what exists), git log for what is actually recent, decision logs and any in-progress build/handoff docs for what is in flight, and README/roadmap prose LAST and only for open intent (founding docs rot; cross-check their claims against git log) — and rewrite PLAN.md as the real map of this codebase: components with stable {#id}s, needs:/links: edges between them, files: globs for the paths each owns, and verb-led concrete titles with tech: sublines. Keep it to 5-9 components no matter how big the repo — a component is a part one agent could own for a session, with its own doneness and at least one edge; anything smaller is a task inside one. Verify every status against the CODE, not the docs — READMEs and roadmaps rot; mark [x] only after finding the implementing source or artifact, and cite that evidence on its tech: line (e.g. tech: TurnView.swift) so a human can audit every tick; if you cannot find evidence, leave it unchecked and say so in the decisions note. Statuses must be honest — [x] only for what verifiably exists, [~] only for what you are working on right now, everything else [ ]. Tag open tasks with an indented from: line naming provenance — from: agent when an in-progress build/handoff doc or your own declared intent claims it imminently, from: roadmap when sourced only from planning docs; omit when unsure. Record the backfill under ## decisions.'
 async function firstRunFlow() {
@@ -910,12 +911,13 @@ async function bootDedup() {
     fetch(`http://127.0.0.1:${p}/whoami`, { signal: AbortSignal.timeout(400) }).then(r => r.json()).then(w => w.repoPath === repo ? p : null).catch(() => null))
   const hit = (await Promise.all(probes)).find(Boolean)
   if (hit) { console.log(`agenttrail is already running for this repo · http://localhost:${hit}`); process.exit(0) }
+  server.once('listening', onListen) // here, not per attempt: a failed attempt's callback would also fire
   listenWithFallback()
 }
 bootDedup()
 
 // ---------- init ----------
-async function init() {
+async function init({ ask = true } = {}) {
   fs.mkdirSync(atDir, { recursive: true })
   if (!fs.existsSync(planPath)) {
     fs.writeFileSync(planPath, `# ${path.basename(repo)}
@@ -939,7 +941,7 @@ tech: scaffolding
       console.log(`appended agenttrail convention block to ${name}`)
     }
   }
-  if (await askYesNo('wire Claude Code hooks into .claude/settings.local.json (gitignored, local only)? [Y/n] ')) installHooks()
+  if (!ask || await askYesNo('wire Claude Code hooks into .claude/settings.local.json (gitignored, local only)? [Y/n] ')) installHooks()
   const gi = path.join(repo, '.gitignore')
   const giText = safeRead(gi)
   if (!giText.includes('.agenttrail')) fs.appendFileSync(gi, (giText.endsWith('\n') || !giText ? '' : '\n') + '.agenttrail/\n')
@@ -968,6 +970,7 @@ function installHooks() {
   for (const ev of ['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'SessionStart', 'SubagentStop']) {
     const list = cfg.hooks[ev] = cfg.hooks[ev] || []
     if (!hasMapRelay(list)) { list.push({ matcher: '*', hooks: [{ type: 'command', command: cmd }] }); added++ }
+    else added += repointRelays(list, cmd)
   }
   if (added) {
     fs.mkdirSync(dir, { recursive: true })

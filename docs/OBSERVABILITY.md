@@ -62,10 +62,10 @@ Map reads sessions working inside the watched repo, from logs touched in the las
 
 Map binds to `127.0.0.1`. It requires no Agenttrail account, telemetry service, transcript upload or extra model call. The browser uses bundled graphics and system fonts.
 
-The hook relay sends hook payloads to local Map services, and Map opens Claude and Codex logs read-only. The map can show shortened command text, search terms and other tool details. It saves recent activity, cycle summaries and log read positions under `~/.agenttrail`. It stores those shortened details, which can include the start of a command or prompt, but not whole prompts, replies, file contents or tool output. Check visible details before sharing screenshots or recordings.
+The hook relay sends hook payloads to local Map services, and Map opens Claude and Codex logs read-only. The map can show shortened command text, search terms and other tool details. It saves recent activity, cycle summaries and log read positions under `~/.agenttrail`. It stores those shortened details, which can include the start of a command or prompt, but not whole prompts, replies, file contents or tool output, in files only your user can read. Check visible details before sharing screenshots or recordings.
 
 Map answers only requests with a local `Host`, and rejects any foreign `Origin`. Setup and starting a board also need a token that the Map page receives when it loads; each running board has its own, stored at `~/.agenttrail/tokens/<port>.token` for sibling boards to use. The hook endpoint takes no token, so installed relays keep working; any local process can post events to it, but a web page cannot.
 
-Normal watching does not edit your repo. Explicit setup creates plan and instruction files and a `.gitignore` entry, and offers Claude hooks; noninteractive `init` assumes yes. Map never sends agent prompts, approves provider actions or changes native task status.
+Normal watching does not edit your repo. Explicit setup creates plan and instruction files and a `.gitignore` entry, and offers Claude hooks; noninteractive `init` and the page's setup button assume yes. Map never sends agent prompts, approves provider actions or changes native task status.
 
 [Start Map](../README.md#run-it-in-your-repo) · [Contribute](../CONTRIBUTING.md)

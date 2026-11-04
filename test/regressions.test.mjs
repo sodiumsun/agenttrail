@@ -39,3 +39,69 @@ describe('a plan cannot run script in the Map page', () => {
   })
 })
 
+describe('starting up', () => {
+  test('a Map that moves off a busy port starts once', async () => {
+    world = tempWorld('# p\n')
+    const base = await freePortBase()
+    const blocker = net.createServer()
+    await new Promise(r => blocker.listen(base, '127.0.0.1', r))
+    const child = spawn(process.execPath, [BIN, world.repo, '--no-open'], { env: cleanEnv(world.home, { AGENTTRAIL_PORT_BASE: String(base) }), stdio: ['ignore', 'pipe', 'pipe'] })
+    let out = ''
+    child.stdout.on('data', c => out += c)
+    await until(() => out.includes('localhost:'), 'the banner')
+    await new Promise(r => setTimeout(r, 300))
+    child.kill()
+    blocker.close()
+    assert.equal(out.match(/agenttrail ·/g).length, 1, out)
+  })
+  test('the page sets up a repo without waiting on the terminal', { skip: spawnSync('python3', ['-V']).status !== 0 }, async () => {
+    world = tempWorld()
+    const base = await freePortBase()
+    // A pty, as in a terminal or a Herdr tab: stdin is a TTY and nobody answers it.
+    const child = spawn('python3', ['-c', 'import pty,sys;pty.spawn(sys.argv[1:])', process.execPath, BIN, world.repo, '--no-open'], {
+      env: cleanEnv(world.home, { AGENTTRAIL_PORT_BASE: String(base), AGENTTRAIL_PORT: String(base) }), stdio: ['pipe', 'pipe', 'ignore'],
+    })
+    let out = ''
+    child.stdout.on('data', c => out += c)
+    try {
+      await until(() => out.includes('localhost:'), 'the banner')
+      const token = (await request(base, '/')).body.match(/name="agenttrail-token" content="([^"]*)"/)[1]
+      const res = await request(base, '/setup', { method: 'POST', headers: { 'x-agenttrail-token': token } })
+      assert.equal(JSON.parse(res.body).ok, true)
+      assert.ok(fs.existsSync(path.join(world.repo, '.claude', 'settings.local.json')))
+    } finally {
+      child.stdin.write('\x03')
+      child.kill('SIGKILL')
+      await request(base, '/whoami').catch(() => {})
+      spawnSync('pkill', ['-f', world.repo])
+    }
+  })
+  test('saved state and its folder are private to this user', async () => {
+    const map = await boot('# p\n')
+    await map.stop()
+    const dir = path.join(world.home, '.agenttrail')
+    const file = fs.readdirSync(dir).find(f => f.endsWith('.json'))
+    assert.equal(fs.statSync(path.join(dir, file)).mode & 0o077, 0)
+    fs.chmodSync(path.join(dir, file), 0o644) // as an earlier version left it
+    const again = await startMap({ repo: world.repo, home: world.home, base: await freePortBase() })
+    await again.stop()
+    assert.equal(fs.statSync(path.join(dir, file)).mode & 0o077, 0)
+  })
+})
+
+describe('hooks from an earlier install', () => {
+  test('init points a stale relay at this version and adds no second one', () => {
+    world = tempWorld()
+    const stale = 'node "/gone/_npx/old/node_modules/agenttrail/bin/agenttrail.mjs" hook'
+    const other = { matcher: '*', hooks: [{ type: 'command', command: 'echo mine' }] }
+    const sp = path.join(world.repo, '.claude', 'settings.local.json')
+    fs.mkdirSync(path.dirname(sp))
+    fs.writeFileSync(sp, JSON.stringify({ hooks: { Stop: [other, { matcher: '*', hooks: [{ type: 'command', command: stale }] }], PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'agenttrail hook' }] }] } }))
+    spawnSync(process.execPath, [BIN, 'init', '--hooks-only'], { cwd: world.repo, env: cleanEnv(world.home) })
+    const { hooks } = JSON.parse(fs.readFileSync(sp, 'utf8'))
+    const commands = ev => hooks[ev].flatMap(e => e.hooks.map(h => h.command))
+    assert.deepEqual(commands('Stop'), ['echo mine', `node ${JSON.stringify(BIN)} hook`])
+    assert.deepEqual(commands('PreToolUse'), ['agenttrail hook'], 'a command on PATH has no stale path')
+  })
+})
+

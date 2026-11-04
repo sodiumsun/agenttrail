@@ -16,5 +16,14 @@ export function isMapRelayCommand(command) {
   if (words.length === 2) return words[0] === 'agenttrail'
   return false
 }
+// A relay installed by an earlier version names that copy's path, which may be an
+// npx cache since replaced or removed. `agenttrail hook` finds itself on PATH, so stays.
+export function repointRelays(entries, command) {
+  let changed = 0
+  for (const entry of entries) for (const hook of [entry, ...(Array.isArray(entry?.hooks) ? entry.hooks : [])]) {
+    if (hook?.command !== command && isMapRelayCommand(hook?.command) && shellWords(hook.command).length === 3) { hook.command = command; changed++ }
+  }
+  return changed
+}
 export const hasMapRelay = entries => Array.isArray(entries) && entries.some(entry =>
   isMapRelayCommand(entry?.command) || (Array.isArray(entry?.hooks) && entry.hooks.some(h => isMapRelayCommand(h?.command))))
