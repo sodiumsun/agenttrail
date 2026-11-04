@@ -134,7 +134,8 @@ export function codexEffects(row, meta, cursor) {
   return []
 }
 
-const numberedDirs = async (dir, digits) => (await entries(dir)).filter(e => e.isDirectory() && new RegExp(`^\\d{${digits}}$`).test(e.name)).map(e => path.join(dir, e.name))
+// Newest first: past the candidate limit, it must be old days that go unread.
+const numberedDirs = async (dir, digits) => (await entries(dir)).filter(e => e.isDirectory() && new RegExp(`^\\d{${digits}}$`).test(e.name)).map(e => path.join(dir, e.name)).sort().reverse()
 
 export class CodexLogReader extends LogTailReader {
   constructor({ codexHome, ...rest }) {

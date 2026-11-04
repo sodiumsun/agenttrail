@@ -141,6 +141,16 @@ export class ClaudeLogReader extends LogTailReader {
         this.meta.set(file, meta)
         return meta
       }
+      // A pasted screenshot can make the first row longer than the head: any later row will do.
+      const { size } = await fs.stat(file)
+      const tail = size > META_BYTES ? lines(await readSlice(file, size - META_BYTES, META_BYTES)) : []
+      for (const line of tail.reverse()) {
+        const row = line.includes('"sessionId"') ? parsed(line) : null
+        if (typeof row?.sessionId !== 'string' || typeof row.cwd !== 'string') continue
+        const meta = { id: row.sessionId, cwd: row.cwd, startedAt: null }
+        this.meta.set(file, meta)
+        return meta
+      }
     } catch {}
     return null // still being written, or not a session: look again later
   }
@@ -166,12 +176,15 @@ export class ClaudeLogReader extends LogTailReader {
     const seen = new Set()
     const recent = []
     this.limited = false
-    for (const project of await entries(base)) {
-      if (!project.isDirectory()) continue
-      for (const e of await entries(path.join(base, project.name))) {
+    // Newest first, so that past the limit it is old projects that go unread. A new
+    // session's file touches its folder; one long session in a quiet folder may not.
+    const projects = (await entries(base)).filter(e => e.isDirectory()).map(e => e.name)
+    const touched = new Map(await Promise.all(projects.map(async p => [p, await fs.stat(path.join(base, p)).then(s => s.mtimeMs, () => 0)])))
+    for (const project of projects.sort((a, b) => touched.get(b) - touched.get(a))) {
+      for (const e of await entries(path.join(base, project))) {
         if (!e.isFile() || !e.name.endsWith('.jsonl')) continue
         if (seen.size >= MAX_CANDIDATES) { this.limited = true; break }
-        const file = path.join(base, project.name, e.name)
+        const file = path.join(base, project, e.name)
         seen.add(file)
         try {
           const { mtimeMs, size } = await fs.stat(file)

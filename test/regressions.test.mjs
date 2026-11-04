@@ -170,3 +170,49 @@ describe('run status', () => {
   })
 })
 
+describe('finding logs', () => {
+  const recent = at => fs.utimesSync(at, new Date(), new Date())
+  test('a Claude session whose first row is huge is still followed', async () => {
+    const home = tempDir('claude-big')
+    const dir = path.join(home, 'projects', 'p')
+    fs.mkdirSync(dir, { recursive: true })
+    const row = extra => JSON.stringify({ type: 'user', sessionId: 'big', cwd: '/repo', isSidechain: false, timestamp: iso(Date.now()), message: { role: 'user', content: 'hi' }, ...extra })
+    // A pasted screenshot sits in the session's first row.
+    fs.writeFileSync(path.join(dir, 'big.jsonl'), `${row({ image: 'x'.repeat(META_BYTES + 10) })}\n${row()}\n`)
+    const seen = []
+    const reader = new ClaudeLogReader({ claudeHome: home, wants: c => c === '/repo', rel: () => null, apply: (meta, effects) => seen.push([meta, effects]) })
+    await reader.poll()
+    fs.rmSync(home, { recursive: true, force: true })
+    assert.equal(seen[0]?.[0].id, 'big')
+  })
+  test('past the candidate limit, the newest Codex sessions are the ones kept', async () => {
+    const home = tempDir('codex-many')
+    const day = d => path.join(home, 'sessions', ...d.split('/'))
+    fs.mkdirSync(day('2024/01/01'), { recursive: true })
+    fs.mkdirSync(day('2026/11/04'), { recursive: true })
+    for (let i = 0; i < MAX_CANDIDATES + 1; i++) fs.closeSync(fs.openSync(path.join(day('2024/01/01'), `rollout-${i}.jsonl`), 'w'))
+    const live = path.join(day('2026/11/04'), 'rollout-live.jsonl')
+    fs.writeFileSync(live, `${JSON.stringify({ timestamp: iso(Date.now()), type: 'session_meta', payload: { id: 'live', cwd: '/repo' } })}\n`)
+    recent(live)
+    const reader = new CodexLogReader({ codexHome: home, wants: c => c === '/repo', apply: () => {} })
+    await reader.poll()
+    const watched = reader.watched
+    fs.rmSync(home, { recursive: true, force: true })
+    assert.deepEqual(watched, [live])
+  })
+  test('past the candidate limit, a Claude project with new sessions is kept', async () => {
+    const home = tempDir('claude-many')
+    const old = path.join(home, 'projects', 'a-old'), live = path.join(home, 'projects', 'z-live')
+    fs.mkdirSync(old, { recursive: true }); fs.mkdirSync(live)
+    for (let i = 0; i < MAX_CANDIDATES + 1; i++) fs.closeSync(fs.openSync(path.join(old, `s${i}.jsonl`), 'w'))
+    fs.utimesSync(old, new Date(Date.now() - 86400e3), new Date(Date.now() - 86400e3))
+    const file = path.join(live, 'live.jsonl')
+    fs.writeFileSync(file, `${JSON.stringify({ type: 'user', sessionId: 'live', cwd: '/repo', timestamp: iso(Date.now()) })}\n`)
+    const reader = new ClaudeLogReader({ claudeHome: home, wants: c => c === '/repo', rel: () => null, apply: () => {} })
+    await reader.poll()
+    const watched = reader.watched
+    fs.rmSync(home, { recursive: true, force: true })
+    assert.deepEqual(watched, [file])
+  })
+})
+
