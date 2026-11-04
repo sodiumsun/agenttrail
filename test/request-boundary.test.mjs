@@ -23,7 +23,7 @@ describe('Map request boundary', () => {
   after(async () => { await stopAll(); world.cleanup() })
 
   test('a foreign Host is rejected on every route', async () => {
-    for (const route of ['/', '/model', '/whoami', '/events', '/board-lite']) {
+    for (const route of ['/', '/model', '/panel', '/whoami', '/events', '/board-lite']) {
       const r = await map.get(route, { host: 'evil.example' })
       assert.equal(r.status, 403, route)
       assert.ok(!r.body.includes(world.repo), route)
@@ -36,6 +36,7 @@ describe('Map request boundary', () => {
     const token = await map.token()
     for (const origin of ['http://evil.example', `https://127.0.0.1:${map.port}`, 'null', `http://localhost:${map.port + 7}`]) {
       assert.equal((await map.get('/model', { origin })).status, 403, origin)
+      assert.equal((await map.get('/panel', { origin })).status, 403, origin)
       assert.equal((await map.post('/hook', { cwd: world.repo, session_id: 'foreign', hook_event_name: 'SessionStart' }, { origin })).status, 403, origin)
       assert.equal((await map.post('/setup', '{}', { origin, 'x-agenttrail-token': token })).status, 403, origin)
     }

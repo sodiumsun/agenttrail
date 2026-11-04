@@ -12,6 +12,7 @@ import { applyTaskEffect, claudeTaskEffect, clean } from './lib/tasks.mjs'
 import { hasMapRelay } from './lib/hooks.mjs'
 import { ClaudeLogReader, SUBAGENT_TOOL, subagentName, toolDetail as describeTool } from './lib/claude.mjs'
 import { CodexLogReader } from './lib/codex.mjs'
+import { panelFeed } from './lib/panel.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -627,6 +628,20 @@ function summaryModel() {
     activity,
   }
 }
+function panelModel() {
+  return panelFeed({
+    project: session.project, repoPath: repo, port,
+    hasPlan: planText.length > 0,
+    components: parsed.nodes.filter(n => n.level === 'component'),
+    runs: liveRuns(),
+    sources: {
+      hooks: hooksInstalled(),
+      claudeLogs: fs.existsSync(path.join(claudeHome, 'projects')),
+      codexLogs: fs.existsSync(path.join(codexHome, 'sessions')),
+    },
+    now: Date.now(),
+  })
+}
 function liteModel() {
   const m = model()
   const { tree, treeTruncated, ...rest } = m
@@ -811,6 +826,8 @@ const server = http.createServer((req, res) => {
       .catch(() => res.writeHead(502).end('{}'))
   } else if (u.pathname === '/summary') {
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(summaryModel()))
+  } else if (u.pathname === '/panel' && req.method === 'GET') {
+    json(res, 200, panelModel())
   } else if (u.pathname === '/fleet') {
     fleetModel().then(d => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(d)))
   } else if (u.pathname === '/model') {
@@ -829,14 +846,16 @@ const server = http.createServer((req, res) => {
       .finally(() => { if (!res.writableEnded) res.writeHead(200).end() })
   } else res.writeHead(404).end()
 })
+const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
+const claudeHome = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
 const codexLogs = new CodexLogReader({
-  codexHome: process.env.CODEX_HOME || path.join(os.homedir(), '.codex'),
+  codexHome,
   wants: inRepo,
   cursors: codexCursors,
   apply: (meta, effects) => { for (const e of effects) applyCodexEffect(meta, e) },
 })
 const claudeLogs = new ClaudeLogReader({
-  claudeHome: process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'),
+  claudeHome,
   wants: inRepo,
   rel: relToRepo,
   cursors: claudeCursors,
@@ -857,7 +876,9 @@ function listenWithFallback(tries = 20) {
 }
 const BACKFILL_PROMPT = 'Read the "agenttrail plan convention" section in CLAUDE.md or AGENTS.md. Then study this repo in trust order — the code and directory layout first (what exists), git log for what is actually recent, decision logs and any in-progress build/handoff docs for what is in flight, and README/roadmap prose LAST and only for open intent (founding docs rot; cross-check their claims against git log) — and rewrite PLAN.md as the real map of this codebase: components with stable {#id}s, needs:/links: edges between them, files: globs for the paths each owns, and verb-led concrete titles with tech: sublines. Keep it to 5-9 components no matter how big the repo — a component is a part one agent could own for a session, with its own doneness and at least one edge; anything smaller is a task inside one. Verify every status against the CODE, not the docs — READMEs and roadmaps rot; mark [x] only after finding the implementing source or artifact, and cite that evidence on its tech: line (e.g. tech: TurnView.swift) so a human can audit every tick; if you cannot find evidence, leave it unchecked and say so in the decisions note. Statuses must be honest — [x] only for what verifiably exists, [~] only for what you are working on right now, everything else [ ]. Tag open tasks with an indented from: line naming provenance — from: agent when an in-progress build/handoff doc or your own declared intent claims it imminently, from: roadmap when sourced only from planning docs; omit when unsure. Record the backfill under ## decisions.'
 async function firstRunFlow() {
-  if (planText.length || !process.stdin.isTTY) return
+  // --no-open means something else started this daemon (the Herdr panel, autostart):
+  // nobody is waiting at a setup prompt, and pressing Enter must not write to the repo.
+  if (planText.length || !process.stdin.isTTY || noOpen) return
   console.log('\nno PLAN.md here yet — the live layer works now; the map needs a plan.')
   if (await askYesNo('set up the plan convention (PLAN.md skeleton + agent instructions + local hooks)? [Y/n] ')) {
     await init()

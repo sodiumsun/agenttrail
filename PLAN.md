@@ -110,7 +110,7 @@ files: [public/**]
 tech: Claude Code hooks plus local Claude and Codex log readers — bin/lib/claude.mjs, bin/lib/codex.mjs
 needs: [plan-reader]
 links: [map]
-files: [bin/**, public/**, test/**, .github/workflows/map.yml]
+files: [bin/**, public/**, test/**, herdr/**, .github/workflows/map.yml]
 - [x] Restrict Map actions to trusted local requests {#runs-request-boundary}
   by: claude
   tech: requestProblem + action token in bin/agenttrail.mjs; test/request-boundary.test.mjs covers foreign Host/Origin, tokens, registered-board proxies, relays and sibling polling.
@@ -160,6 +160,22 @@ files: [bin/**, public/**, test/**, .github/workflows/map.yml]
 - [x] Sub-agents show as child rows on their parent's run card {#runs-subagents}
   tech: Agent or Task calls and SubagentStop hooks -> run.subagents in bin/agenttrail.mjs; .run-sub rows
   by: claude
+- [x] Draw every state of the Herdr panel for the owner to review {#herdr-mockup}
+  by: claude
+  from: agent
+  tech: one HTML review page outside the repo; not a screenshot
+- [x] Give the Herdr panel a small read-only feed from Map {#runs-panel-feed}
+  by: claude
+  from: agent
+  tech: GET /panel in bin/agenttrail.mjs, shape in bin/lib/panel.mjs, schema 1, behind requestProblem; test/panel-feed.test.mjs
+- [~] Show each agent's trail beside its terminal in Herdr {#herdr-panel}
+  by: claude
+  from: agent
+  tech: herdr/agenttrail/mods/agenttrail; pure link, view and feed modules with node:test tests
+- [ ] Write the Herdr recipe, preview and install notes {#herdr-recipe}
+  from: agent
+  tech: herdr/agenttrail/RECIPE.md in Herdr's six-part order; herdr/README.md
+
 ## See the whole fleet {#fleet}
 tech: /summary + /fleet aggregation; zoom-out altitude with live repo cards
 needs: [runs]
@@ -261,3 +277,4 @@ files: [README.md, docs/**, package.json, CONTRIBUTING.md, .github/**]
 - 2026-11-04: Map writes need a per-daemon token. The page gets it inside the served HTML; a board proxying setup to a sibling reads that sibling's token from ~/.agenttrail/tokens/<port>.token (0600), so a token only ever goes to the daemon that wrote it. /hook stays tokenless for installed relays and relies on the Origin check: browsers always attach Origin to a POST, so a foreign page cannot reach it
 - 2026-11-04: a native task change commits only on a recognised success acknowledgement. Failed, unknown or interrupted results keep the last confirmed list. A task update with no known title is dropped rather than shown under an invented name
 - 2026-11-04: Codex reading is bounded to the last 2 MiB per file (real logs reach 1 GB), limited to files touched in the last 2 hours (the same window a Map run lives), and its cursors are saved in the same state file as the runs so a restart cannot replay events twice. A run's evidence field says which of its facts are reported, observed, inferred or unknown
+- 2026-11-04: the Herdr panel is tasks under Watch live runs, not a new component. It passes three parts of the convention's test (it changes what the product does, a second task is plain in remote machines, it owns herdr/**) but fails the first: nothing depends on it yet and it is unpublished. Promote it to a card if work keeps clustering in herdr/**. The panel reads only GET /panel, a versioned feed, so it never depends on Map's internal run shape. A run links to a terminal by terminal id first, then by repo only when exactly one local agent and one live run match; otherwise the row stays unlinked
