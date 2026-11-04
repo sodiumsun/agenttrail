@@ -8,6 +8,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import crypto from 'node:crypto'
+import { applyTaskEffect, claudeTaskEffect, clean } from './lib/tasks.mjs'
+import { hasMapRelay } from './lib/hooks.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -77,6 +79,7 @@ async function relayHook() {
   let raw = ''
   try { for await (const c of process.stdin) raw += c } catch {}
   if (!raw) return
+  raw = withTerminalId(raw)
   const ports = process.env.AGENTTRAIL_PORT ? [parseInt(process.env.AGENTTRAIL_PORT, 10)] : boardPorts
   await Promise.allSettled(ports.map(p => fetch(`http://127.0.0.1:${p}/hook`, {
     method: 'POST', body: raw, signal: AbortSignal.timeout(400),
@@ -94,6 +97,18 @@ async function relayHook() {
       }
     }
   } catch {}
+}
+
+// Herdr names the terminal an agent runs in. It is the only thing that can tell
+// two agents in one repo apart; without Herdr the event goes through untouched.
+function withTerminalId(raw) {
+  const id = process.env.HC_TERMINAL_ID
+  if (!id) return raw
+  try {
+    const ev = JSON.parse(raw)
+    if (ev && typeof ev === 'object' && !Array.isArray(ev)) return JSON.stringify({ ...ev, hc_terminal_id: id })
+  } catch {}
+  return raw
 }
 
 // ---------- PLAN.md parser (convention v2: components, owner-first names) ----------
@@ -208,7 +223,11 @@ function touchComponents(file, at) {
 const runs = {} // session id -> run
 const handoffs = [] // {c, from, to, at} — one session picks up where another stopped
 function runFor(id, cwd) {
-  return runs[id] || (runs[id] = { id, agent: 'claude', cwd, startedAt: Date.now(), lastEventAt: Date.now(), todos: [], currentTool: null, recentTools: [], componentId: null, ended: false })
+  return runs[id] || (runs[id] = { id, agent: 'claude', provider: 'claude', source: 'hook', cwd, startedAt: Date.now(), lastEventAt: Date.now(), todos: [], todosUpdatedAt: null, currentTool: null, recentTools: [], componentId: null, ended: false })
+}
+function commitTaskEffect(run, effect, at) {
+  const next = effect && applyTaskEffect(run.todos, effect)
+  if (next) { run.todos = next; run.todosUpdatedAt = at }
 }
 function toolDetail(input = {}) {
   const p = input.file_path || input.notebook_path
@@ -224,12 +243,15 @@ function handleHookEvent(ev) {
   const cwd = ev.cwd || ''
   if (!(cwd === repo || cwd.startsWith(repo + path.sep))) return false
   const run = runFor(ev.session_id || 'session', cwd)
-  if (ev.agent) run.agent = String(ev.agent).slice(0, 24).toLowerCase()
+  if (ev.agent) run.agent = run.provider = String(ev.agent).slice(0, 24).toLowerCase()
+  const terminalId = clean(ev.hc_terminal_id, 200)
+  if (terminalId) run.terminalId = terminalId
   run.lastEventAt = Date.now()
   stateDirty = true
   const kind = ev.hook_event_name
+  run.timedOut = false
   if (kind === 'SessionStart') run.ended = false
-  else if (kind === 'Stop' || kind === 'SessionEnd') { run.ended = true; run.currentTool = null }
+  else if (kind === 'Stop' || kind === 'SessionEnd') { run.ended = true; run.sessionEnded = kind === 'SessionEnd'; run.currentTool = null }
   else if (kind === 'PreToolUse') {
     run.ended = false
     run.currentTool = { name: ev.tool_name, detail: toolDetail(ev.tool_input), at: Date.now() }
@@ -241,15 +263,19 @@ function handleHookEvent(ev) {
   } else if (kind === 'SubagentStop') {
     const sa = (run.subagents || []).find(x => !x.ended)
     if (sa) { sa.ended = true; sa.endedAt = Date.now() }
+  } else if (kind === 'PostToolUseFailure') {
+    run.ended = false
+    const started = run.currentTool && run.currentTool.name === ev.tool_name ? run.currentTool.at : Date.now()
+    run.recentTools.unshift({ name: ev.tool_name, detail: toolDetail(ev.tool_input), at: Date.now(), ms: Date.now() - started, error: true })
+    if (run.recentTools.length > 8) run.recentTools.length = 8
+    run.currentTool = null
   } else if (kind === 'PostToolUse') {
     run.ended = false
     const started = run.currentTool && run.currentTool.name === ev.tool_name ? run.currentTool.at : Date.now()
     run.recentTools.unshift({ name: ev.tool_name, detail: toolDetail(ev.tool_input), at: Date.now(), ms: Date.now() - started })
     if (run.recentTools.length > 8) run.recentTools.length = 8
     run.currentTool = null
-    if (ev.tool_name === 'TodoWrite' && ev.tool_input && Array.isArray(ev.tool_input.todos)) {
-      run.todos = ev.tool_input.todos.map(t => ({ content: t.content, status: t.status }))
-    }
+    if (ev.status !== 'error' && ev.status !== 'failed') commitTaskEffect(run, claudeTaskEffect(ev.tool_name, ev.tool_input, ev.tool_response ?? ev.tool_output), Date.now())
     const rel = relToRepo(ev.tool_input && (ev.tool_input.file_path || ev.tool_input.notebook_path))
     if (rel) {
       heatFile(rel, Date.now())
@@ -279,11 +305,27 @@ function archiveRun(r) {
   if (cycles.length > 30) cycles.length = 30
   stateDirty = true
 }
+// What a reader may trust about a run, in the terms of docs/OBSERVABILITY.md.
+// `todos` is unknown until a provider confirms a list; an empty list that was
+// reported is different from a session that never reported one.
+function describeRun(r) {
+  r.provider = r.provider || r.agent
+  r.source = r.source || 'hook'
+  r.todosUpdatedAt = r.todosUpdatedAt ?? null
+  r.status = !r.ended ? 'active' : r.timedOut ? 'unknown' : r.interrupted ? 'interrupted' : r.sessionEnded ? 'ended' : 'idle'
+  r.evidence = {
+    lifecycle: 'reported',
+    todos: r.todosUpdatedAt ? 'reported' : 'unknown',
+    tools: r.currentTool || r.recentTools.length ? 'observed' : 'unknown',
+    component: r.componentId ? 'inferred' : 'unknown',
+  }
+}
 function liveRuns() {
   const now = Date.now()
   for (const [id, r] of Object.entries(runs)) {
-    if (!r.ended && now - r.lastEventAt > 15 * 60e3) { r.ended = true; r.currentTool = null } // missed Stop
-    if (now - r.lastEventAt > 2 * 3600e3) { archiveRun(r); delete runs[id] } // 2h trail → saved cycle record
+    if (!r.ended && now - r.lastEventAt > 15 * 60e3) { r.ended = true; r.timedOut = true; r.currentTool = null } // missed Stop
+    if (now - r.lastEventAt > 2 * 3600e3) { archiveRun(r); delete runs[id]; continue } // 2h trail → saved cycle record
+    describeRun(r)
   }
   return Object.values(runs).sort((a, b) => a.startedAt - b.startedAt)
 }
@@ -390,7 +432,8 @@ function lintPlan() {
 let hooksInstalledCache = { at: 0, val: false }
 function hooksInstalled() {
   if (Date.now() - hooksInstalledCache.at < 30000) return hooksInstalledCache.val
-  const val = safeRead(path.join(repo, '.claude', 'settings.local.json')).includes('agenttrail')
+  let val = false
+  try { val = Object.values(JSON.parse(safeRead(path.join(repo, '.claude', 'settings.local.json'))).hooks || {}).some(hasMapRelay) } catch {}
   hooksInstalledCache = { at: Date.now(), val }
   return val
 }
@@ -508,7 +551,7 @@ function summaryModel() {
   return {
     port, project: session.project, hasPlan: planText.length > 0,
     components: parsed.nodes.filter(n => n.level === 'component').map(n => ({ id: n.id, title: n.title, status: n.status, touchedAt: compTouched[n.id] || null })),
-    runs: liveRuns().map(r => ({ agent: r.agent, ended: r.ended, componentId: r.componentId, startedAt: r.startedAt, tool: r.currentTool ? `${r.currentTool.name} · ${r.currentTool.detail}` : null, todos: (r.todos || []).length, todosDone: (r.todos || []).filter(t => t.status === 'completed').length })),
+    runs: liveRuns().map(r => ({ id: r.id, provider: r.provider, status: r.status, terminalId: r.terminalId, agent: r.agent, ended: r.ended, componentId: r.componentId, startedAt: r.startedAt, tool: r.currentTool ? `${r.currentTool.name} · ${r.currentTool.detail}` : null, todos: (r.todos || []).length, todosDone: (r.todos || []).filter(t => t.status === 'completed').length })),
     activity,
   }
 }
@@ -800,14 +843,20 @@ function installHooks() {
   const dir = path.join(repo, '.claude')
   const sp = path.join(dir, 'settings.local.json')
   let cfg = {}
-  try { cfg = JSON.parse(fs.readFileSync(sp, 'utf8')) } catch {}
+  const existing = safeRead(sp)
+  if (existing.trim()) {
+    try { cfg = JSON.parse(existing) } catch { cfg = null }
+    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) {
+      console.error('skipped hooks: .claude/settings.local.json is not valid JSON. Repair it, then run agenttrail init again.')
+      return
+    }
+  }
   const cmd = `node ${JSON.stringify(fileURLToPath(import.meta.url))} hook`
   cfg.hooks = cfg.hooks || {}
   let added = 0
-  for (const ev of ['PreToolUse', 'PostToolUse', 'Stop', 'SessionStart', 'SubagentStop']) {
+  for (const ev of ['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'SessionStart', 'SubagentStop']) {
     const list = cfg.hooks[ev] = cfg.hooks[ev] || []
-    const present = JSON.stringify(list).includes('agenttrail')
-    if (!present) { list.push({ matcher: '*', hooks: [{ type: 'command', command: cmd }] }); added++ }
+    if (!hasMapRelay(list)) { list.push({ matcher: '*', hooks: [{ type: 'command', command: cmd }] }); added++ }
   }
   if (added) {
     fs.mkdirSync(dir, { recursive: true })

@@ -114,20 +114,19 @@ files: [bin/**, public/**]
 - [x] Restrict Map actions to trusted local requests {#runs-request-boundary}
   by: claude
   tech: requestProblem + action token in bin/agenttrail.mjs; test/request-boundary.test.mjs covers foreign Host/Origin, tokens, registered-board proxies, relays and sibling polling.
-- [~] Keep Map and Kitchen hook setup independent {#runs-distinct-hooks}
+- [x] Keep Map and Kitchen hook setup independent {#runs-distinct-hooks}
   by: claude
-  tech: Map's substring detection mistakes Kitchen's relay for its own; verify both installation orders and preserve unrelated hooks.
-- [~] Show current Claude task lists on run cards, only after the tool succeeded {#runs-modern-tasks}
+  tech: isMapRelayCommand in bin/lib/hooks.mjs matches the relay command itself; test/hooks.test.mjs covers both orders, repeats and similar names.
+- [x] Show current Claude task lists on run cards, only after the tool succeeded {#runs-modern-tasks}
   by: claude
-  from: agent
-  tech: TaskCreate/TaskUpdate/TaskGet/TaskList acknowledgements ported from Kitchen into bin/lib/tasks.mjs; TodoWrite follows the same rule.
-- [ ] Follow Codex sessions in a watched repo as Map runs {#runs-codex}
+  tech: claudeTaskEffect in bin/lib/tasks.mjs covers TaskCreate/TaskUpdate/TaskGet/TaskList and TodoWrite; test/tasks.test.mjs.
+- [~] Follow Codex sessions in a watched repo as Map runs {#runs-codex}
+  by: claude
   from: agent
   tech: bin/lib/codex.mjs reads ~/.codex/sessions read-only, bounded to the file tail, cursors saved with runs.
-- [~] Tell two agents in one repo apart by their Herdr terminal {#runs-terminal-id}
+- [x] Tell two agents in one repo apart by their Herdr terminal {#runs-terminal-id}
   by: claude
-  from: agent
-  tech: relay adds HC_TERMINAL_ID to the hook event; run.terminalId.
+  tech: withTerminalId in bin/agenttrail.mjs; run.terminalId, tested in test/hooks.test.mjs.
 - [ ] Test Map automatically on every change {#runs-tests}
   from: agent
   tech: zero-dependency node:test suite in test/, root npm test, .github/workflows/map.yml.
