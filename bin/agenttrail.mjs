@@ -130,7 +130,7 @@ const TECH_RE = /^\s*tech:\s*(.+?)\s*$/i
 const BY_RE = /^\s*by:\s*(.+?)\s*$/i
 const FROM_RE = /^\s*(?:from|horizon):\s*(agent|roadmap|now|backlog)\s*$/i
 const KIND_RE = /^\s*kind:\s*([a-z][a-z-]*)\s*$/i
-const URL_RE = /^\s*url:\s*(\S+)\s*$/i
+const URL_RE = /^\s*url:\s*(https?:\/\/[^\s"'<>]+)\s*$/i // a plan can come from a repo you don't trust: web addresses only
 const DECISIONS_RE = /^##\s+decisions\s*$/i
 const idList = s => s.split(',').map(x => x.trim()).filter(Boolean)
 
