@@ -158,6 +158,17 @@ describe('runs from hooks', () => {
     assert.equal((await run('s')).status, 'ended')
   })
 
+  test('sub-agents show under the Agent tool and the older Task', async () => {
+    for (const [session_id, tool_name] of [['agent-tool', 'Agent'], ['task-tool', 'Task']]) {
+      await hook({ session_id, hook_event_name: 'PreToolUse', tool_name, tool_use_id: `${session_id}-1`, tool_input: { description: 'Check the docs', prompt: 'PRIVATE' } })
+      assert.deepEqual((await run(session_id)).subagents.map(s => [s.name, s.ended]), [['Check the docs', false]])
+      await hook({ session_id, hook_event_name: 'SubagentStop' })
+      assert.equal((await run(session_id)).subagents[0].ended, true)
+    }
+    await hook({ session_id: 'not-agent', hook_event_name: 'PreToolUse', tool_name: 'TaskCreate', tool_input: { subject: 'x' } })
+    assert.equal('subagents' in await run('not-agent'), false)
+  })
+
   test('HC_TERMINAL_ID tells two agents in one repo apart', async () => {
     assert.equal(relay({ hook_event_name: 'SessionStart', session_id: 'left' }, { HC_TERMINAL_ID: 'term-1' }).status, 0)
     assert.equal(relay({ hook_event_name: 'SessionStart', session_id: 'right' }, { HC_TERMINAL_ID: 'term-2' }).status, 0)

@@ -1,18 +1,10 @@
-// Reads local Codex session logs. Strictly read-only: this file opens logs for
-// reading and writes nothing under the Codex home. Real logs reach a gigabyte,
-// so a poll only ever reads a bounded tail.
+// Reads local Codex session logs. Strictly read-only, with the bounds of logtail.mjs.
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { LogTailReader, MAX_CANDIDATES, MAX_WATCHED, META_BYTES, READ_LIMIT, RECENT_MS, entries, hold, remember } from './logtail.mjs'
 import { clean, taskList } from './tasks.mjs'
 
-export const READ_LIMIT = 2 * 1024 * 1024
-export const RECENT_MS = 2 * 3600e3 // a Map run lives this long after its last event
-const META_BYTES = 256 * 1024
-const DISCOVER_MS = 10_000
-const MAX_CANDIDATES = 10_000
-const MAX_WATCHED = 120
-const MAX_PENDING = 64
-const MAX_SEEN = 64
+export { READ_LIMIT, RECENT_MS }
 const DETAIL = 90
 
 // Recent Codex runs its tools inside this code wrapper and reports each real
@@ -48,14 +40,6 @@ function exitCode(text) {
   } catch {}
   const m = /^Exit code: (-?\d+)/m.exec(text)
   return m ? Number(m[1]) : null
-}
-const remember = (cursor, id) => {
-  if (!id) return false
-  cursor.seen ||= []
-  if (cursor.seen.includes(id)) return true
-  cursor.seen.push(id)
-  if (cursor.seen.length > MAX_SEEN) cursor.seen.shift()
-  return false
 }
 const durationMs = (d, fallback) => d && typeof d.secs === 'number' ? Math.round(d.secs * 1000 + (d.nanos || 0) / 1e6) : fallback
 
@@ -101,10 +85,7 @@ function startCall(p, at, cursor) {
     ...(/update_plan$/.test(p.name || '') ? { plan: taskList(args.plan) } : {}),
     ...(isPatch ? { files: [...patch.matchAll(PATCH_FILE)].map(m => m[1].trim()) } : {}),
   }
-  cursor.pending ||= {}
-  cursor.pending[p.call_id] = call
-  const ids = Object.keys(cursor.pending)
-  if (ids.length > MAX_PENDING) delete cursor.pending[ids[0]]
+  hold(cursor, p.call_id, call)
   return [{ kind: 'tool-start', at, callId: p.call_id, name, detail: call.detail }]
 }
 
@@ -153,22 +134,16 @@ export function codexEffects(row, meta, cursor) {
   return []
 }
 
-async function entries(dir) {
-  try { return await fs.readdir(dir, { withFileTypes: true }) } catch { return [] }
-}
 const numberedDirs = async (dir, digits) => (await entries(dir)).filter(e => e.isDirectory() && new RegExp(`^\\d{${digits}}$`).test(e.name)).map(e => path.join(dir, e.name))
 
-export class CodexLogReader {
-  // wants(cwd) decides which sessions belong to this repo. apply(meta, effects)
-  // receives a file's effects. cursors is shared by reference so the caller can
-  // save it atomically with the runs those effects produced.
-  constructor({ codexHome, wants, apply, cursors = {} }) {
-    Object.assign(this, { codexHome, wants, apply, cursors })
-    this.meta = new Map()
-    this.watched = []
-    this.lastDiscovery = 0
-    this.busy = false
-    this.limited = false
+export class CodexLogReader extends LogTailReader {
+  constructor({ codexHome, ...rest }) {
+    super(rest)
+    this.codexHome = codexHome
+  }
+
+  rowEffects(row, meta, cursor) {
+    return codexEffects(row, meta, cursor)
   }
 
   async metadata(file) {
@@ -220,60 +195,5 @@ export class CodexLogReader {
     }
     this.watched = watched
     if (!this.limited) for (const file of Object.keys(this.cursors)) if (!seen.has(file)) delete this.cursors[file]
-  }
-
-  // Reads what is new in one file. The cursor stops at the last complete line,
-  // so a row still being written, or split by a read, is read whole next time.
-  async readNew(file) {
-    const { size } = await fs.stat(file)
-    let cursor = this.cursors[file] ||= { offset: 0 }
-    if (size < cursor.offset) cursor = this.cursors[file] = { offset: 0 }
-    if (size === cursor.offset) return false
-    let start = cursor.offset
-    let dropFirst = !!cursor.dropFirst
-    if (size - start > READ_LIMIT) {
-      start = size - READ_LIMIT
-      dropFirst = true
-      cursor.limited = true
-    }
-    const buffer = Buffer.alloc(size - start)
-    const handle = await fs.open(file, 'r')
-    try { await handle.read(buffer, 0, buffer.length, start) } finally { await handle.close() }
-    const last = buffer.lastIndexOf(10)
-    if (last < 0) {
-      if (buffer.length >= READ_LIMIT) { cursor.offset = size; cursor.dropFirst = true }
-      return false
-    }
-    const first = dropFirst ? buffer.indexOf(10) + 1 : 0
-    cursor.offset = start + last + 1
-    cursor.dropFirst = false
-    const meta = { ...this.meta.get(file), limited: !!cursor.limited }
-    const effects = []
-    for (const line of buffer.toString('utf8', first, last + 1).split('\n')) {
-      if (!line) continue
-      let row
-      try { row = JSON.parse(line) } catch { continue }
-      effects.push(...codexEffects(row, meta, cursor))
-    }
-    if (effects.length) this.apply(meta, effects)
-    return effects.length > 0
-  }
-
-  async poll(now = Date.now()) {
-    if (this.busy) return false
-    this.busy = true
-    let changed = false
-    try {
-      if (now - this.lastDiscovery >= DISCOVER_MS) {
-        this.lastDiscovery = now
-        await this.discover(now)
-      }
-      for (const file of this.watched) {
-        try { changed = await this.readNew(file) || changed } catch {} // a log that vanished is simply gone
-      }
-    } finally {
-      this.busy = false
-    }
-    return changed
   }
 }

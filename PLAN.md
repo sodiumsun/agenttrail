@@ -120,6 +120,12 @@ files: [bin/**, public/**, test/**, .github/workflows/map.yml]
 - [x] Show current Claude task lists on run cards, only after the tool succeeded {#runs-modern-tasks}
   by: claude
   tech: claudeTaskEffect in bin/lib/tasks.mjs covers TaskCreate/TaskUpdate/TaskGet/TaskList and TodoWrite; test/tasks.test.mjs.
+- [x] Follow Claude sessions from local logs, with or without hooks {#runs-claude-logs}
+  by: claude
+  tech: ClaudeLogReader in bin/lib/claude.mjs on the shared bounded reader in bin/lib/logtail.mjs; one run per session id when hooks and logs both see it; test/claude.test.mjs.
+- [x] Show current sub-agents, whichever tool name Claude uses {#runs-agent-tool}
+  by: claude
+  tech: SUBAGENT_TOOL in bin/lib/claude.mjs matches Agent and Task; test/hooks.test.mjs and test/claude.test.mjs.
 - [x] Follow Codex sessions in a watched repo as Map runs {#runs-codex}
   by: claude
   tech: CodexLogReader in bin/lib/codex.mjs reads ~/.codex/sessions read-only, bounded to the file tail, cursors saved with runs; test/codex.test.mjs.
@@ -287,6 +293,7 @@ files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/
   tech: README definition, sentence-case headings, npm metadata, GitHub description and topics
 
 ## decisions
+- 2026-11-04: Retire Kitchen and make Map the whole product. The owner judged the 3D cooking view a gimmick. Map first gains what only Kitchen had that is worth keeping: reading Claude sessions from local logs with no hooks installed. Kitchen's last published commit is kept under the local tag kitchen-final, and agenttrail-kitchen stays on npm. Cursor hooks, artifact plates and receipts, and work categories are dropped on purpose.
 - 2026-09-09: Review the public repository for concrete reliability and setup issues, recording reproducible findings separately from planned features. Describe Agenttrail as the local observability project with two views: Agenttrail Map for project structure and activity, and Agenttrail Kitchen for native tasks and role contributions. Document their current independent services and differing provider support rather than implying a unified event backend or agent orchestration.
 - 2026-09-08: Publish Kitchen to npm now that the owner has restored registry login. Use alpha.3 for the refreshed package README instead of changing the existing alpha.2 archive; keep the experimental version explicit and use the latest tag so npx agenttrail-kitchen . works. Verify the exact public package from a fresh consumer environment, then publish matching GitHub release assets and setup instructions. The owner chose browser setup first; no editor extension is being added.
 - 2026-09-08: Audit the downloadable public Kitchen release from an isolated consumer install, verify real repo observation and adapter behavior, fix launch gaps, and refresh the root README with Kitchen screenshots and exact install/support instructions. No editor extension currently exists; clarify whether the owner wants one built or wants the working browser setup documented. Keep unknown integration status explicit.

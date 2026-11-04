@@ -10,6 +10,7 @@ import os from 'node:os'
 import crypto from 'node:crypto'
 import { applyTaskEffect, claudeTaskEffect, clean } from './lib/tasks.mjs'
 import { hasMapRelay } from './lib/hooks.mjs'
+import { ClaudeLogReader, SUBAGENT_TOOL, subagentName, toolDetail as describeTool } from './lib/claude.mjs'
 import { CodexLogReader } from './lib/codex.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -233,18 +234,22 @@ function commitTaskEffect(run, effect, at) {
   const next = effect && applyTaskEffect(run.todos, effect)
   if (next) { run.todos = next; run.todosUpdatedAt = at }
 }
-function toolDetail(input = {}) {
-  const p = input.file_path || input.notebook_path
-  const d = input.command || (p ? (relToRepo(p) ?? p) : '') || input.description || input.pattern || input.url || input.query || input.prompt || ''
-  return String(d).replace(/\s+/g, ' ').slice(0, 90)
-}
+const toolDetail = input => describeTool(input, relToRepo)
 function relToRepo(p) {
   if (!p) return null
   const r = path.resolve(String(p))
   const root = repoRoots.find(x => r === x || r.startsWith(x + path.sep))
   return root === undefined ? null : r.slice(root.length + 1)
 }
+// A hook and a log can both report one call. Their ids settle it; a hook that
+// carries no id is matched on what the call was and when.
+const NEAR_MS = 5000
+function sameCall(a, b) {
+  if (a.callId && b.callId) return a.callId === b.callId
+  return !!(a.callId || b.callId) && a.name === b.name && a.detail === b.detail && Math.abs(a.at - b.at) < NEAR_MS
+}
 function recordTool(run, tool) {
+  if (run.recentTools.some(t => sameCall(t, tool))) return
   run.recentTools.unshift(tool)
   if (run.recentTools.length > 8) run.recentTools.length = 8
 }
@@ -263,6 +268,12 @@ function noteRunFile(run, rel, at) {
     if (run.path && run.path.length > 20) run.path.shift()
   }
 }
+function addSubagent(run, sub) {
+  const known = (run.subagents || []).some(s => s.callId && sub.callId ? s.callId === sub.callId : !s.ended && s.name === sub.name && Math.abs(s.startedAt - sub.startedAt) < NEAR_MS)
+  if (known) return
+  ;(run.subagents = run.subagents || []).push(sub)
+  if (run.subagents.length > 12) run.subagents.shift()
+}
 function handleHookEvent(ev) {
   const cwd = ev.cwd || ''
   if (!inRepo(cwd)) return false
@@ -270,32 +281,32 @@ function handleHookEvent(ev) {
   if (ev.agent) run.agent = run.provider = String(ev.agent).slice(0, 24).toLowerCase()
   const terminalId = clean(ev.hc_terminal_id, 200)
   if (terminalId) run.terminalId = terminalId
-  run.lastEventAt = Date.now()
+  if (run.source === 'claude-log') run.source = BOTH_SOURCES
+  const callId = clean(ev.tool_use_id, 200)
+  const call = callId ? { callId } : {}
+  run.lastEventAt = run.hookAt = Date.now()
   stateDirty = true
   const kind = ev.hook_event_name
   run.timedOut = false
+  run.interrupted = false
   if (kind === 'SessionStart') run.ended = false
   else if (kind === 'Stop' || kind === 'SessionEnd') { run.ended = true; run.sessionEnded = kind === 'SessionEnd'; run.currentTool = null }
   else if (kind === 'PreToolUse') {
     run.ended = false
-    run.currentTool = { name: ev.tool_name, detail: toolDetail(ev.tool_input), at: Date.now() }
-    if (ev.tool_name === 'Task' && ev.tool_input) {
-      const name = String(ev.tool_input.description || ev.tool_input.subagent_type || 'sub-agent').slice(0, 60)
-      ;(run.subagents = run.subagents || []).push({ name, startedAt: Date.now(), ended: false })
-      if (run.subagents.length > 12) run.subagents.shift()
-    }
+    run.currentTool = { name: ev.tool_name, detail: toolDetail(ev.tool_input), at: Date.now(), ...call }
+    if (SUBAGENT_TOOL.test(ev.tool_name) && ev.tool_input) addSubagent(run, { name: subagentName(ev.tool_input), startedAt: Date.now(), ended: false, ...call })
   } else if (kind === 'SubagentStop') {
     const sa = (run.subagents || []).find(x => !x.ended)
     if (sa) { sa.ended = true; sa.endedAt = Date.now() }
   } else if (kind === 'PostToolUseFailure') {
     run.ended = false
     const started = run.currentTool && run.currentTool.name === ev.tool_name ? run.currentTool.at : Date.now()
-    recordTool(run, { name: ev.tool_name, detail: toolDetail(ev.tool_input), at: Date.now(), ms: Date.now() - started, error: true })
+    recordTool(run, { name: ev.tool_name, detail: toolDetail(ev.tool_input), at: Date.now(), ms: Date.now() - started, error: true, ...call })
     run.currentTool = null
   } else if (kind === 'PostToolUse') {
     run.ended = false
     const started = run.currentTool && run.currentTool.name === ev.tool_name ? run.currentTool.at : Date.now()
-    recordTool(run, { name: ev.tool_name, detail: toolDetail(ev.tool_input), at: Date.now(), ms: Date.now() - started })
+    recordTool(run, { name: ev.tool_name, detail: toolDetail(ev.tool_input), at: Date.now(), ms: Date.now() - started, ...call })
     run.currentTool = null
     if (ev.status !== 'error' && ev.status !== 'failed') commitTaskEffect(run, claudeTaskEffect(ev.tool_name, ev.tool_input, ev.tool_response ?? ev.tool_output), Date.now())
     const rel = relToRepo(ev.tool_input && (ev.tool_input.file_path || ev.tool_input.notebook_path))
@@ -303,27 +314,51 @@ function handleHookEvent(ev) {
   } else return false
   return true
 }
-// Codex has no hook here: its local log is the source, so every time below is
-// the log's own, and an old session replayed at boot does not look live.
-function applyCodexEffect(meta, e) {
-  const run = runs[meta.id] || (runs[meta.id] = { id: meta.id, agent: 'codex', provider: 'codex', source: 'codex-log', cwd: meta.cwd, startedAt: meta.startedAt ?? e.at, lastEventAt: e.at, todos: [], todosUpdatedAt: null, currentTool: null, recentTools: [], componentId: null, ended: false })
-  if (meta.parentId) run.parentId = meta.parentId
+const BOTH_SOURCES = 'hook+claude-log'
+const logRun = (meta, e, agent, source) => ({ id: meta.id, agent, provider: agent, source, cwd: meta.cwd, startedAt: meta.startedAt ?? e.at, lastEventAt: e.at, todos: [], todosUpdatedAt: null, currentTool: null, recentTools: [], componentId: null, ended: false })
+// Every time below is the log's own, so an old session replayed at boot does not look live.
+function applyLogEffect(run, meta, e) {
   if (meta.limited) run.historyLimited = true
   run.lastEventAt = Math.max(run.lastEventAt, e.at)
   run.timedOut = false
   stateDirty = true
-  if (e.kind === 'turn-start') { run.ended = false; run.interrupted = false }
+  if (e.kind === 'turn-start') { run.ended = false; run.interrupted = false; run.sessionEnded = false }
   else if (e.kind === 'turn-end' || e.kind === 'interrupted') { run.ended = true; run.interrupted = e.kind === 'interrupted'; run.currentTool = null }
   else if (e.kind === 'tool-start') { run.ended = false; run.currentTool = { name: e.name, detail: e.detail, at: e.at, callId: e.callId } }
-  else if (e.kind === 'tasks') commitTaskEffect(run, { replace: e.list }, e.at)
-  else if (e.kind === 'tool-end') {
-    if (e.callId && run.currentTool?.callId === e.callId) run.currentTool = null
-    if (e.record) recordTool(run, { name: e.name, detail: e.detail, at: e.at, ms: e.ms, ...(e.error ? { error: true } : {}) })
+  else if (e.kind === 'tasks') commitTaskEffect(run, e.effect ?? { replace: e.list }, e.at)
+  else if (e.kind === 'subagent-start') addSubagent(run, { name: e.name, startedAt: e.at, ended: false, callId: e.callId })
+  else if (e.kind === 'subagent-detached' || e.kind === 'subagent-end') {
+    const sub = (run.subagents || []).find(s => s.callId === e.callId)
+    if (sub && e.kind === 'subagent-end') { sub.ended = true; sub.endedAt = e.at; delete sub.detached }
+    else if (sub && !sub.ended) sub.detached = true // running on its own: the log may never report its end
+  } else if (e.kind === 'tool-end') {
+    if (run.currentTool && (e.callId ? run.currentTool.callId === e.callId || (!run.currentTool.callId && run.currentTool.name === e.name) : false)) run.currentTool = null
+    if (e.record) recordTool(run, { name: e.name, detail: e.detail, at: e.at, ms: e.ms, ...(e.callId ? { callId: e.callId } : {}), ...(e.error ? { error: true } : {}) })
     for (const file of e.files) {
       const rel = relToRepo(path.resolve(meta.cwd, file))
       if (rel) noteRunFile(run, rel, e.at)
     }
   }
+}
+// Codex has no hook here: its local log is the source.
+function applyCodexEffect(meta, e) {
+  const run = runs[meta.id] || (runs[meta.id] = logRun(meta, e, 'codex', 'codex-log'))
+  if (meta.parentId) run.parentId = meta.parentId
+  applyLogEffect(run, meta, e)
+}
+// A Claude session can reach Map by hook and by log. It stays one run under its
+// session id, so hook-only facts like terminalId are kept. Hooks are live and
+// carry more, so a log row only counts if it is newer than the last hook heard:
+// the log fills in for a daemon that was down, or hooks that are not installed.
+// Only the log says a sub-agent went to the background or finished there.
+function applyClaudeEffect(meta, e) {
+  const known = runs[meta.id]
+  const logOnly = e.kind === 'subagent-detached' || e.kind === 'subagent-end'
+  if (known?.hookAt && e.at <= known.hookAt && !logOnly) return
+  const run = known || (runs[meta.id] = logRun(meta, e, 'claude', 'claude-log'))
+  if (run.source === 'hook') run.source = BOTH_SOURCES
+  if (meta.startedAt && meta.startedAt < run.startedAt) run.startedAt = meta.startedAt
+  applyLogEffect(run, meta, e)
 }
 let cycles = [] // saved history: [{start,end,sessions:[{agent,componentId,tools}]}]
 function archiveRun(r) {
@@ -365,6 +400,7 @@ function liveRuns() {
 // ---------- observed-state persistence (survives daemon restarts) ----------
 // Lives under ~/.agenttrail keyed by repo path — never touches the repo itself.
 let codexCursors = {} // log file -> read position, saved with the runs built from it
+let claudeCursors = {}
 const stateFile = path.join(os.homedir(), '.agenttrail', crypto.createHash('sha1').update(repo).digest('hex').slice(0, 12) + '.json')
 let stateDirty = false
 function loadState() {
@@ -373,11 +409,13 @@ function loadState() {
     activity = st.activity || null
     recentActivity = st.recentActivity || []
     Object.assign(runs, st.runs || {})
+    for (const r of Object.values(runs)) if ((r.source || 'hook') === 'hook') r.hookAt ??= r.lastEventAt // saved before logs were read
     cycles = st.cycles || []
     Object.assign(compTouched, st.compTouched || {})
     Object.assign(compRecent, st.compRecent || {})
     Object.assign(fileHeat, st.fileHeat || {})
     codexCursors = st.codexCursors || {}
+    claudeCursors = st.claudeCursors || {}
   } catch {}
 }
 function saveState() {
@@ -385,7 +423,7 @@ function saveState() {
   stateDirty = false
   try {
     fs.mkdirSync(path.dirname(stateFile), { recursive: true })
-    fs.writeFileSync(stateFile, JSON.stringify({ repoPath: repo, port, activity, recentActivity, compTouched, compRecent, runs, fileHeat, cycles, codexCursors }))
+    fs.writeFileSync(stateFile, JSON.stringify({ repoPath: repo, port, activity, recentActivity, compTouched, compRecent, runs, fileHeat, cycles, codexCursors, claudeCursors }))
   } catch {}
 }
 loadState()
@@ -797,7 +835,14 @@ const codexLogs = new CodexLogReader({
   cursors: codexCursors,
   apply: (meta, effects) => { for (const e of effects) applyCodexEffect(meta, e) },
 })
-const pollCodexLogs = () => codexLogs.poll().then(changed => { if (changed) hookTick() }).catch(() => {})
+const claudeLogs = new ClaudeLogReader({
+  claudeHome: process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'),
+  wants: inRepo,
+  rel: relToRepo,
+  cursors: claudeCursors,
+  apply: (meta, effects) => { for (const e of effects) applyClaudeEffect(meta, e) },
+})
+const pollLogs = () => Promise.all([codexLogs.poll(), claudeLogs.poll()]).then(changed => { if (changed.some(Boolean)) hookTick() }).catch(() => {})
 let lastHookTick = 0
 function hookTick() {
   const now = Date.now()
@@ -826,8 +871,8 @@ async function firstRunFlow() {
 }
 function onListen() {
   publishActionToken()
-  pollCodexLogs()
-  setInterval(pollCodexLogs, 2000).unref()
+  pollLogs()
+  setInterval(pollLogs, 2000).unref()
   console.log(`agenttrail · ${session.project} · http://localhost:${port}`)
   if (!planText) console.log('no PLAN.md found — run `agenttrail init` in the repo to scaffold one')
   if (openBrowser && !noOpen) {
