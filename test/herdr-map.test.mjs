@@ -6,7 +6,7 @@ import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { Feed } from '../herdr/agenttrail-map/mods/agenttrail-map/feed.js'
-import { boardEdges, boardLayout, cardAgents } from '../herdr/agenttrail-map/mods/agenttrail-map/graph.js'
+import { boardEdges, boardLayout, cardAgents, dockedIn, hostOf, liveCard } from '../herdr/agenttrail-map/mods/agenttrail-map/graph.js'
 import { freePortBase, startMap, stopAll, tempWorld } from './helpers.mjs'
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -94,6 +94,54 @@ describe('the Map prototype mod', () => {
     assert.equal(feed.board.project, board.project)
     assert.equal(feed.port, map.port)
     assert.equal(await feed.tick(), false)
+  })
+
+  test('a narrow view opens where a live run is pinned, then the freshest edit, then the plan, else nothing', () => {
+    const c = (id, extra = {}) => ({ id, level: 'component', ...extra })
+    const old = NOW - 3600e3
+    const plan = [c('a', { status: 'active' }), c('b', { touchedAt: NOW - 9000 }), c('c', { touchedAt: NOW - 2000 }), c('d', { touchedAt: old })]
+    assert.equal(liveCard({ plan, runs: [{ componentId: 'a' }] }, NOW), 'a')
+    assert.equal(liveCard({ plan, runs: [{ componentId: 'a' }, { componentId: 'b' }] }, NOW), 'b')
+    assert.equal(liveCard({ plan, runs: [{ componentId: 'gone' }, { componentId: 'a', ended: true }] }, NOW), 'c')
+    assert.equal(liveCard({ plan: [plan[0], c('b'), plan[3]], runs: [] }, NOW), 'a')
+    assert.equal(liveCard({ plan: [c('b'), plan[3]] }, NOW), null)
+  })
+
+  describe('where a copy lives', () => {
+    const mod = 'agenttrail-map'
+    const dock = { type: 'row', children: [{ content: { tab: 'active' } }, { id: 'dock', content: { mod } }] }
+    const map = (pane, tab, zoomed = false) => ({ pane, tab, mod, zoomed })
+    const shell = (pane, tab) => ({ pane, tab, terminal: 't1' })
+    const host = (over) => hostOf({ layout: { type: 'row', children: [] }, props: {}, panes: [], tab: 'T', focusedPane: null, mod, ...over })
+
+    test('a block is found by its props, at any depth, and not when hidden', () => {
+      assert.ok(dockedIn(dock, mod, {}))
+      assert.ok(dockedIn(dock, mod, null))
+      assert.ok(!dockedIn(dock, mod, { expanded: true }))
+      assert.ok(dockedIn({ children: [{ children: [{ floating: [{ content: { mod, props: { a: 1 } } }] }] }] }, mod, { a: 1 }))
+      assert.ok(!dockedIn({ children: [{ hidden: true, children: dock.children }] }, mod, {}))
+    })
+
+    test('docked: expand must not zoom, even with a terminal focused or a Map pane beside it', () => {
+      assert.deepEqual(host({ layout: dock, panes: [shell('p1', 'T')], focusedPane: 'p1' }), { kind: 'block' })
+      assert.deepEqual(host({ layout: dock, panes: [shell('p1', 'T'), map('p2', 'T')] }), { kind: 'block' })
+    })
+
+    test('a pane beside others zooms itself, and knows it is zoomed', () => {
+      assert.deepEqual(host({ panes: [shell('p1', 'T'), map('p2', 'T', true)] }), { kind: 'pane', pane: 'p2', zoomed: true })
+      assert.equal(host({ panes: [shell('p1', 'T'), map('p2', 'T'), map('p3', 'T')], focusedPane: 'p3' }).pane, 'p3')
+      assert.equal(host({ layout: dock, props: { other: 1 }, panes: [shell('p1', 'T'), map('p2', 'T')] }).kind, 'pane')
+    })
+
+    test('an expanded tab closes only while Map is alone in it, so collapse cannot end a terminal', () => {
+      assert.equal(host({ layout: dock, props: { expanded: true }, panes: [map('p2', 'T')] }).kind, 'tab')
+      assert.equal(host({ layout: dock, props: { expanded: true }, panes: [map('p2', 'T'), shell('p1', 'T')] }).kind, 'pane')
+      assert.equal(host({ panes: [map('p2', 'T')] }).kind, 'lone')
+    })
+
+    test('a Map pane in another tab is not this copy', () => {
+      assert.deepEqual(host({ panes: [map('p2', 'other')] }), { kind: 'block' })
+    })
   })
 
   test('the mod never writes to Map', () => {

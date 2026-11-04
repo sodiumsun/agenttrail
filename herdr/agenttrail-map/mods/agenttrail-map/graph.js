@@ -152,3 +152,38 @@ export const ago = (ms, now) => {
   const s = Math.max(0, Math.round((now - ms) / 1000));
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`;
 };
+
+// The card a narrow view should open on: where a live run is pinned, then the freshest
+// edit, then what the plan says is in progress. A run comes first because one edit can
+// touch several cards (a path glob) while a run names exactly one. Null when nothing is live.
+export function liveCard(b, now) {
+  const comps = b.plan.filter((n) => n.level === "component");
+  const newest = (list) => [...list].sort((a, c) => (c.touchedAt ?? 0) - (a.touchedAt ?? 0))[0];
+  const pinned = comps.filter((p) => (b.runs ?? []).some((r) => !r.ended && r.componentId === p.id));
+  return (newest(pinned) ?? newest(comps.filter((p) => touched(p, now))) ?? comps.find((p) => p.status === "active"))?.id ?? null;
+}
+
+const sameProps = (a, c) => JSON.stringify(a ?? {}) === JSON.stringify(c ?? {});
+
+// Is a block in this layout tree showing this mod with these props?
+export function dockedIn(node, mod, props) {
+  if (!node || typeof node !== "object" || node.hidden) return false;
+  if (Array.isArray(node)) return node.some((n) => dockedIn(n, mod, props));
+  if (node.content?.mod === mod && sameProps(node.content.props, props)) return true;
+  return dockedIn(node.children, mod, props) || dockedIn(node.floating, mod, props);
+}
+
+// Where this copy lives. Herdr tells a mod neither its pane nor its block: props() is
+// only what it was given. So a block is found by matching props in layout(), and a pane
+// among the panes of the shown tab. An unclear case counts as a block, the safe side:
+// a stray pane.zoom would zoom someone else's pane, a stray tab.new only opens a tab.
+//   block: docked, expand opens a tab      pane: beside others, expand zooms it
+//   tab: an expanded tab, collapse closes  lone: already the whole tab, nothing to do
+export function hostOf({ layout, props, panes, tab, focusedPane, mod }) {
+  const here = panes.filter((p) => p.tab === tab);
+  const mine = here.filter((p) => p.mod === mod);
+  const pane = mine.find((p) => p.pane === focusedPane) ?? mine[0];
+  if (!pane || dockedIn(layout, mod, props)) return { kind: "block" };
+  if (here.length > 1) return { kind: "pane", pane: pane.pane, zoomed: pane.zoomed };
+  return { kind: props?.expanded ? "tab" : "lone", pane: pane.pane };
+}
