@@ -15,7 +15,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const argv = process.argv.slice(2)
 let cmd = null
 let repo = process.cwd()
-let port = 5330
+// Sibling boards live on a 15-port range. AGENTTRAIL_PORT pins this daemon and
+// its relay to one port; AGENTTRAIL_PORT_BASE moves the whole range, so a test
+// fleet can never see or be seen by the owner's real boards.
+const PORT_BASE = parseInt(process.env.AGENTTRAIL_PORT_BASE, 10) || 5330
+const boardPorts = Array.from({ length: 15 }, (_, i) => PORT_BASE + i)
+let port = parseInt(process.env.AGENTTRAIL_PORT, 10) || PORT_BASE
 const spawningPaths = new Set()
 let openBrowser = process.stdout.isTTY ? true : false
 let noOpen = false
@@ -72,7 +77,7 @@ async function relayHook() {
   let raw = ''
   try { for await (const c of process.stdin) raw += c } catch {}
   if (!raw) return
-  const ports = process.env.AGENTTRAIL_PORT ? [parseInt(process.env.AGENTTRAIL_PORT, 10)] : Array.from({ length: 15 }, (_, i) => 5330 + i)
+  const ports = process.env.AGENTTRAIL_PORT ? [parseInt(process.env.AGENTTRAIL_PORT, 10)] : boardPorts
   await Promise.allSettled(ports.map(p => fetch(`http://127.0.0.1:${p}/hook`, {
     method: 'POST', body: raw, signal: AbortSignal.timeout(400),
   }).catch(() => {})))
@@ -485,7 +490,7 @@ function throttleBroadcast() {
 let boards = [{ port, project: path.basename(repo), self: true }]
 async function discoverBoards() {
   const found = [{ port, project: session.project, self: true }]
-  await Promise.allSettled(Array.from({ length: 15 }, (_, i) => 5330 + i).filter(p => p !== port).map(async p => {
+  await Promise.allSettled(boardPorts.filter(p => p !== port).map(async p => {
     try {
       const r = await fetch(`http://127.0.0.1:${p}/whoami`, { signal: AbortSignal.timeout(300) })
       const j = await r.json()
@@ -545,10 +550,63 @@ async function fleetModel() {
 
 // ---------- http ----------
 const indexPath = path.join(__dirname, '..', 'public', 'index.html')
+const json = (res, status, data) => res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(data))
+
+// Binding to loopback does not prove a request came from this machine's user:
+// a web page can aim a browser at 127.0.0.1, or rebind its own name to it.
+// Host stops rebinding. Origin stops other pages. Relays and sibling boards are
+// plain Node clients with a local Host and no Origin, so they pass unchanged.
+function requestProblem(req) {
+  const local = [`127.0.0.1:${port}`, `localhost:${port}`]
+  if (!local.includes(String(req.headers.host || '').toLowerCase())) return 'Local connections only.'
+  const origin = req.headers.origin
+  if (origin !== undefined && !local.some(h => `http://${h}` === origin.toLowerCase())) return 'Origin is not allowed.'
+  return null
+}
+
+// Write actions also need this daemon's token. The page receives it inside the
+// HTML (other origins cannot read that response), and a board acting on a
+// sibling reads the sibling's own file, so a token only reaches its own daemon.
+const actionToken = crypto.randomBytes(24).toString('hex')
+const tokenDir = path.join(os.homedir(), '.agenttrail', 'tokens')
+const tokenFile = p => path.join(tokenDir, `${p}.token`)
+const tokenDigest = t => crypto.createHash('sha256').update(String(t)).digest()
+const hasActionToken = req => crypto.timingSafeEqual(tokenDigest(req.headers['x-agenttrail-token'] || ''), tokenDigest(actionToken))
+function publishActionToken() {
+  try {
+    fs.mkdirSync(tokenDir, { recursive: true, mode: 0o700 })
+    fs.rmSync(tokenFile(port), { force: true })
+    fs.writeFileSync(tokenFile(port), actionToken, { mode: 0o600, flag: 'wx' })
+    const published = port
+    process.on('exit', () => { try { fs.rmSync(tokenFile(published), { force: true }) } catch {} })
+  } catch {} // sibling setup then fails with a clear error; this board's own page still works
+}
+const isRegisteredBoard = p => boards.some(b => b.port === p)
+async function readBody(req, limit) {
+  const chunks = []
+  let size = 0
+  for await (const c of req) {
+    size += c.length
+    if (size > limit) throw new Error('request too large')
+    chunks.push(c)
+  }
+  return Buffer.concat(chunks).toString('utf8')
+}
+
 const server = http.createServer((req, res) => {
-  const u = new URL(req.url, 'http://x')
+  res.setHeader('x-content-type-options', 'nosniff')
+  res.setHeader('referrer-policy', 'no-referrer')
+  res.setHeader('content-security-policy', "frame-ancestors 'none'")
+  const problem = requestProblem(req)
+  if (problem) return json(res, 403, { ok: false, error: problem })
+  let u
+  try { u = new URL(req.url, 'http://x') } catch { return json(res, 400, { ok: false, error: 'Invalid URL.' }) }
+  if (req.method === 'POST' && ['/setup', '/setup-board', '/spawn'].includes(u.pathname) && !hasActionToken(req)) {
+    return json(res, 403, { ok: false, error: 'Reload the map before changing anything.' })
+  }
   if (u.pathname === '/') {
-    res.writeHead(200, { 'content-type': 'text/html' }).end(fs.readFileSync(indexPath, 'utf8'))
+    const page = fs.readFileSync(indexPath, 'utf8').replace('__AGENTTRAIL_ACTION_TOKEN__', actionToken)
+    res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' }).end(page)
   } else if (u.pathname === '/whoami') {
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ project: session.project, port, repoPath: repo }))
   } else if (u.pathname === '/board-lite') {
@@ -579,24 +637,23 @@ const server = http.createServer((req, res) => {
   } else if (u.pathname === '/setup' && req.method === 'POST') {
     init().then(() => {
       planText = safeRead(planPath); parsed = parsePlan(planText); rebuildMatchers(); planMtime = statMtime(planPath)
+      hooksInstalledCache.at = 0
       broadcast()
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, prompt: BACKFILL_PROMPT }))
     }).catch(e => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: String(e) })))
   } else if (u.pathname === '/setup-board' && req.method === 'POST') {
-    let body = ''
-    req.on('data', c => body += c)
-    req.on('end', async () => {
+    readBody(req, 32_000).then(async body => {
+      const p = Number(JSON.parse(body).port)
+      if (!isRegisteredBoard(p)) return json(res, 403, { ok: false, error: 'That is not a board on this machine.' })
       let out = { ok: false, error: 'no board there' }
       try {
-        const p = Number(JSON.parse(body).port)
-        out = await fetch(`http://127.0.0.1:${p}/setup`, { method: 'POST', signal: AbortSignal.timeout(5000) }).then(r => r.json())
+        const token = p === port ? actionToken : safeRead(tokenFile(p)).trim()
+        out = await fetch(`http://127.0.0.1:${p}/setup`, { method: 'POST', headers: { 'x-agenttrail-token': token }, signal: AbortSignal.timeout(5000) }).then(r => r.json())
       } catch {}
-      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(out))
-    })
+      json(res, 200, out)
+    }).catch(() => json(res, 400, { ok: false, error: 'bad request' }))
   } else if (u.pathname === '/spawn' && req.method === 'POST') {
-    let body = ''
-    req.on('data', c => body += c)
-    req.on('end', async () => {
+    readBody(req, 32_000).then(async body => {
       let out = { ok: false, error: 'bad request' }
       try {
         const p = path.resolve(String(JSON.parse(body).path || ''))
@@ -622,8 +679,8 @@ const server = http.createServer((req, res) => {
           }
         }
       } catch {}
-      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(out))
-    })
+      json(res, 200, out)
+    }).catch(() => json(res, 400, { ok: false, error: 'bad request' }))
   } else if (u.pathname === '/nudge') {
     const cwd = u.searchParams.get('cwd') || ''
     const st = planStaleness()
@@ -633,6 +690,7 @@ const server = http.createServer((req, res) => {
       : '')
   } else if (u.pathname === '/tree-of') {
     const p = parseInt(u.searchParams.get('port'), 10)
+    if (!isRegisteredBoard(p)) return json(res, 403, { error: 'That is not a board on this machine.' })
     fetch(`http://127.0.0.1:${p}/tree`, { signal: AbortSignal.timeout(1500) })
       .then(r => r.text()).then(t => res.writeHead(200, { 'content-type': 'application/json' }).end(t))
       .catch(() => res.writeHead(502).end('{}'))
@@ -648,12 +706,12 @@ const server = http.createServer((req, res) => {
     clients.add(res)
     req.on('close', () => clients.delete(res))
   } else if (u.pathname === '/hook' && req.method === 'POST') {
-    let body = ''
-    req.on('data', c => body += c)
-    req.on('end', () => {
-      try { if (handleHookEvent(JSON.parse(body))) hookTick() } catch {}
-      res.writeHead(200).end()
-    })
+    // Tokenless on purpose: relays already installed in users' repos send none.
+    // Browsers always attach Origin to a POST, so requestProblem() has covered web pages.
+    readBody(req, 16 * 1024 * 1024)
+      .then(body => { try { if (handleHookEvent(JSON.parse(body))) hookTick() } catch {} })
+      .catch(() => {})
+      .finally(() => { if (!res.writableEnded) res.writeHead(200).end() })
   } else res.writeHead(404).end()
 })
 let lastHookTick = 0
@@ -683,6 +741,7 @@ async function firstRunFlow() {
   }
 }
 function onListen() {
+  publishActionToken()
   console.log(`agenttrail · ${session.project} · http://localhost:${port}`)
   if (!planText) console.log('no PLAN.md found — run `agenttrail init` in the repo to scaffold one')
   if (openBrowser && !noOpen) {
@@ -693,7 +752,7 @@ function onListen() {
 }
 async function bootDedup() {
   const probes = []
-  for (let p = 5330; p < 5345; p++) probes.push(
+  for (const p of boardPorts) probes.push(
     fetch(`http://127.0.0.1:${p}/whoami`, { signal: AbortSignal.timeout(400) }).then(r => r.json()).then(w => w.repoPath === repo ? p : null).catch(() => null))
   const hit = (await Promise.all(probes)).find(Boolean)
   if (hit) { console.log(`agenttrail is already running for this repo · http://localhost:${hit}`); process.exit(0) }

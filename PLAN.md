@@ -111,10 +111,26 @@ tech: claude code hooks adapter — PostToolUse/TodoWrite → POST /events
 needs: [plan-reader]
 links: [map]
 files: [bin/**, public/**]
-- [ ] Restrict Map actions to trusted local requests {#runs-request-boundary}
-  tech: repository review reproduced missing Host/Origin validation and mutation authentication; add coverage for UI actions, hooks and cross-board relays.
-- [ ] Keep Map and Kitchen hook setup independent {#runs-distinct-hooks}
+- [x] Restrict Map actions to trusted local requests {#runs-request-boundary}
+  by: claude
+  tech: requestProblem + action token in bin/agenttrail.mjs; test/request-boundary.test.mjs covers foreign Host/Origin, tokens, registered-board proxies, relays and sibling polling.
+- [~] Keep Map and Kitchen hook setup independent {#runs-distinct-hooks}
+  by: claude
   tech: Map's substring detection mistakes Kitchen's relay for its own; verify both installation orders and preserve unrelated hooks.
+- [~] Show current Claude task lists on run cards, only after the tool succeeded {#runs-modern-tasks}
+  by: claude
+  from: agent
+  tech: TaskCreate/TaskUpdate/TaskGet/TaskList acknowledgements ported from Kitchen into bin/lib/tasks.mjs; TodoWrite follows the same rule.
+- [ ] Follow Codex sessions in a watched repo as Map runs {#runs-codex}
+  from: agent
+  tech: bin/lib/codex.mjs reads ~/.codex/sessions read-only, bounded to the file tail, cursors saved with runs.
+- [~] Tell two agents in one repo apart by their Herdr terminal {#runs-terminal-id}
+  by: claude
+  from: agent
+  tech: relay adds HC_TERMINAL_ID to the hook event; run.terminalId.
+- [ ] Test Map automatically on every change {#runs-tests}
+  from: agent
+  tech: zero-dependency node:test suite in test/, root npm test, .github/workflows/map.yml.
 - [x] Receive hook events and track sessions {#runs-endpoint}
   by: claude
   tech: /events endpoint; per-session todos, current tool, recent calls
@@ -296,3 +312,6 @@ files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/
 - 2026-08-27: light mode is a token-only UI variant — dark stays the default, the top-bar switch persists locally, and no layout or product behavior changes
 - 2026-08-27: theme branding uses one app-icon design — light keeps the colorful original; dark is the same rounded-square composition in a night palette
 - 2026-08-29: archived cycles are secondary history, not live run cards — open them from the canvas controls in a right-side drawer so the map stays primary
+- 2026-11-04: Map writes need a per-daemon token. The page gets it inside the served HTML; a board proxying setup to a sibling reads that sibling's token from ~/.agenttrail/tokens/<port>.token (0600), so a token only ever goes to the daemon that wrote it. /hook stays tokenless for installed relays and relies on the Origin check: browsers always attach Origin to a POST, so a foreign page cannot reach it
+- 2026-11-04: a native task change commits only on a recognised success acknowledgement. Failed, unknown or interrupted results keep the last confirmed list. A task update with no known title is dropped rather than shown under an invented name
+- 2026-11-04: Codex reading is bounded to the last 2 MiB per file (real logs reach 1 GB), limited to files touched in the last 2 hours (the same window a Map run lives), and its cursors are saved in the same state file as the runs so a restart cannot replay events twice. A run's evidence field says which of its facts are reported, observed, inferred or unknown

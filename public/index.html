@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#000000">
+<meta name="agenttrail-token" content="__AGENTTRAIL_ACTION_TOKEN__">
 <meta name="description" content="A live map of your coding agent's plan, progress, and drift.">
 <title>agenttrail</title>
 <link id="fav" rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%201000%201000%22%3E%3Crect%20width=%221000%22%20height=%221000%22%20rx=%22210%22%20fill=%22%2317171a%22/%3E%3Cg%20fill=%22none%22%20stroke=%22%23fff%22%20stroke-width=%2292%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22%3E%3Cpath%20d=%22M180%20810C278%20617%20363%20405%20445%20180C467%20120%20535%20120%20560%20180C650%20414%20733%20625%20820%20810%22/%3E%3Cpath%20d=%22M180%20810C300%20704%20430%20646%20610%20590%22/%3E%3C/g%3E%3Ccircle%20cx=%22180%22%20cy=%22810%22%20r=%2274%22%20fill=%22%23fff%22/%3E%3Ccircle%20cx=%22610%22%20cy=%22590%22%20r=%2274%22%20fill=%22%23fff%22/%3E%3Ccircle%20cx=%22820%22%20cy=%22810%22%20r=%2274%22%20fill=%22%23fff%22/%3E%3Ccircle%20cx=%22820%22%20cy=%22810%22%20r=%2238%22%20fill=%22%23FFB21A%22/%3E%3C/svg%3E">
@@ -143,9 +144,11 @@ function renderAddSuggestions(){const box=document.getElementById('add-sugg');if
     return`<button type="button" class="sugg-row" onclick="pickSuggestion(this.dataset.p)" data-p="${esc(p)}"><span class="sugg-name">${esc(name)}</span><span class="sugg-dir">${esc(dir)}</span></button>`}).join('')||(q?`<div class="tree-add-msg">no known repo matches — full path works too</div>`:'')}
 function pickSuggestion(p){const i=document.getElementById('add-path');if(i)i.value=p;submitAddRepo()}
 function toast(msg,ms){let t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';document.body.appendChild(t)}t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),ms||6000)}
+const ACTION_TOKEN=document.querySelector('meta[name="agenttrail-token"]')?.content||''
+const postAction=(url,data)=>fetch(url,{method:'POST',headers:{'x-agenttrail-token':ACTION_TOKEN},body:JSON.stringify(data)})
 let setupBusy=false
 async function setupBoard(port){if(setupBusy)return;setupBusy=true;toast('setting up…')
-  try{const r=await(await fetch('/setup-board',{method:'POST',body:JSON.stringify({port})})).json()
+  try{const r=await(await postAction('/setup-board',{port})).json()
     if(r.ok&&r.prompt){try{await navigator.clipboard.writeText(r.prompt)
         toast('done — a note for your agent is on your clipboard. paste it to the agent working in this repo and the map draws itself.',12000)}
       catch{toast('set up. now ask the agent working in this repo to fill in PLAN.md — the map draws itself.',12000)}
@@ -157,7 +160,7 @@ let addRepoBusy=false
 async function submitAddRepo(){const i=document.getElementById('add-path'),msg=document.getElementById('add-msg');if(!i||!i.value.trim()||addRepoBusy)return
   addRepoBusy=true;setTimeout(()=>addRepoBusy=false,8000)
   msg.textContent='starting the board…'
-  try{const r=await(await fetch('/spawn',{method:'POST',body:JSON.stringify({path:i.value.trim()})})).json()
+  try{const r=await(await postAction('/spawn',{path:i.value.trim()})).json()
     if(r.ok&&r.already)msg.textContent='already on the map — flying there';if(r.ok&&r.already)setTimeout(()=>{flyToRegion(r.already);addRepoOpen=false;renderTree()},600)
     else if(r.ok){msg.textContent='started — appearing shortly…';setTimeout(()=>{addRepoOpen=false;pollWorld()},5000)}
     else msg.textContent=r.error||'could not start it'
