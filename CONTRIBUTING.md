@@ -1,55 +1,48 @@
 # Contributing to Agenttrail
 
-Agenttrail provides local observability for AI coding agents through two views: **Map**, a lightweight project map, and **Kitchen**, an experimental 3D view of current tasks and role contributions. Both use the same repository and issue tracker. They observe agents running in their existing tools; they do not orchestrate those agents. [Product and data model](docs/OBSERVABILITY.md)
+Agenttrail is a local observability tool for AI coding agents: a live project map fed by `PLAN.md`, file changes, and local agent logs and hooks. It observes agents running in their existing tools; it does not orchestrate them. [Product and data model](docs/OBSERVABILITY.md)
 
 ## Find the relevant code
 
 | Area | Location |
 | --- | --- |
-| Map daemon, plans, hooks and fleet | `bin/agenttrail.mjs` |
-| Map interface | `public/index.html` |
-| Kitchen launcher and local relays | `packages/kitchen/bin/` |
-| Provider adapters and workflow state | `packages/kitchen/src/` |
-| Kitchen scene, characters and interface | `packages/kitchen/public/src/` |
-| Kitchen automated checks | `packages/kitchen/test/` |
-| Map automated checks | `test/`, run with `npm test` from the repo root |
+| Daemon, plans, hooks and fleet | `bin/agenttrail.mjs` |
+| Bounded log reading shared by the adapters | `bin/lib/logtail.mjs` |
+| Claude Code and Codex log adapters | `bin/lib/claude.mjs`, `bin/lib/codex.mjs` |
+| Native task lists | `bin/lib/tasks.mjs` |
+| Interface | `public/index.html` |
+| Automated checks | `test/` |
 
-The views currently have separate local services. The kitchen can read the map's local board context; it also has standalone observation. Consolidating the duplicated parsers and adapters is future work. Keep provider interpretation out of the scene renderer so future themes can reuse the evidence model.
+Keep provider interpretation in the adapters, as effects the daemon applies to a run, and out of the page.
 
-## Run and check the kitchen
-
-```sh
-cd packages/kitchen
-npm ci
-npm run build
-npm start -- --example
-```
-
-The example is scripted and labeled. Live provider validation should use your own disposable project. Do not install hooks into unrelated repos or submit real transcripts as test fixtures.
+## Run and check it
 
 ```sh
-npm run check
+node bin/agenttrail.mjs /path/to/a/disposable/repo
 npm test
-npm pack
-node scripts/check-package.mjs ./agenttrail-kitchen-0.1.0-alpha.3.tgz
+node --check bin/agenttrail.mjs
+npm pack --dry-run
 ```
 
-Keep fixtures synthetic, small and focused on a real failure mode. The package smoke check verifies a clean install with no development dependencies or lifecycle scripts, then appends synthetic native logs and checks the live event stream: one session contributes through multiple chefs to one dish, completion reaches its table, and repo file changes are observed. It never uses real home-directory transcripts. Run `node --check bin/agenttrail.mjs` at the repository root for changes touching the existing map daemon, and manually check the relevant view.
+There are no dependencies to install. Tests run every daemon from a temporary HOME and repo on a private port range. To do the same by hand, set `HOME`, `AGENTTRAIL_PORT_BASE` and `AGENTTRAIL_PORT`.
+
+Live provider validation should use your own disposable project. Do not install hooks into unrelated repos or submit real transcripts as test fixtures. Keep fixtures synthetic, small and focused on a real failure mode.
 
 ## Preserve the meaning of activity
 
-- Sessions are actual executors; chefs are responsibilities. Never infer parallel execution from the number of visible chefs.
-- Native todos remain the source of dish identity and completion. Never replace missing task progress with an invented checklist.
+- Never replace missing task progress with an invented checklist. Unknown stays unknown.
+- A native task commits only on a recognised success. A proposal is not a result.
 - A turn ending, tool finishing or file changing does not prove an outcome shipped.
-- Explicit receipt metadata is required for confirmed artifact transfers. Clearly distinguish inferred associations.
+- Label inferred associations as inferred.
+- Provider logs are read-only, and reads stay bounded: real logs reach a gigabyte.
 - Keep pending human actions in the provider's own tool. This project observes; it does not approve or run those actions.
 
 ## Report a problem
 
-Use the [issue tracker](https://github.com/sodiumsun/agenttrail/issues). Include the package version, OS, Node version, provider and a short reproduction. Describe whether the problem affects live data, example mode or both. Redact project paths, task titles and private data from screenshots. Useful labels are `kitchen`, `provider-adapter` and `first-run`.
+Use the [issue tracker](https://github.com/sodiumsun/agenttrail/issues). Include the package version, OS, Node version, provider and a short reproduction. Redact project paths, task titles and private data from screenshots.
 
-In a pull request, explain the trigger, resulting behavior and relevant checks. Include a screenshot or short silent clip for visible scene changes. Preserve the project's visual direction. New dependencies should have a concrete purpose and their license notices must accompany bundled assets.
+In a pull request, explain the trigger, resulting behavior and relevant checks. Include a screenshot or short silent clip for visible changes.
 
 ## License
 
-Project code and original assets are MIT. Preserve the root license and third-party notices. Do not add game assets, soundtrack recordings, personal logs, secrets or local connection state. Contributions must be yours to contribute under the relevant license.
+Project code and original assets are MIT. Preserve the root license. Do not add personal logs, secrets or local connection state. Contributions must be yours to contribute under the relevant license.

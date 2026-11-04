@@ -1,7 +1,7 @@
 {
   "name": "agenttrail",
   "version": "0.2.0",
-  "description": "Agenttrail Map: local observability for AI coding agents through PLAN.md, file activity, Claude Code hooks and local Codex logs. Agenttrail Kitchen is a separate 3D view.",
+  "description": "Local observability for AI coding agents: a live project map from PLAN.md, file activity and local Claude Code and Codex logs, with optional Claude Code hooks.",
   "type": "module",
   "bin": {
     "agenttrail": "bin/agenttrail.mjs"
@@ -28,7 +28,6 @@
     "claude-code",
     "codex",
     "openai-codex",
-    "cursor-ai",
     "coding-agents",
     "ai-coding-agents",
     "agent-observability",

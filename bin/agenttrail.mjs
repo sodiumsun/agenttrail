@@ -222,7 +222,7 @@ function touchComponents(file, at) {
   }
 }
 
-// ---------- live runs (claude code hooks adapter) ----------
+// ---------- live runs (claude code hooks and local logs) ----------
 // The run is the foreground: what the agent is doing right now — current
 // todo, streaming tool line, recent calls — pinned to a component on the map.
 const runs = {} // session id -> run

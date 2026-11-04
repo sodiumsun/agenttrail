@@ -272,7 +272,7 @@ function flyToRegion(port){const r=regions[port];if(!r)return;const stage=$('gra
 function renderZero(){
   const feed=(M.recentActivity||[]).slice(0,8).map(a=>`<div class="zero-row"><span class="dot"></span><span class="zf">${esc(a.file)}${a.n>1?` ×${a.n}`:''}</span><span class="za t-ago" data-at="${a.at}"></span></div>`).join('')
   $('graph').innerHTML=`<div class="zero">
-    <div><h1>Watching ${esc(M.session.project)}</h1><p class="zero-sub">Every file an agent touches shows up below, live — and hooked Claude Code sessions appear as run cards with their plan and current tool. No setup needed for any of that.</p></div>
+    <div><h1>Watching ${esc(M.session.project)}</h1><p class="zero-sub">Every file an agent touches shows up below, live — and Claude Code and Codex sessions appear as run cards with their current tool and any plan they report. No setup needed for any of that.</p></div>
     <div class="zero-feed">${feed||'<div class="zero-empty">Waiting for the first file write — start your agent and watch this fill in.</div>'}</div>
     <div class="firstrun inline"><p><strong>Level 2 — the map.</strong> You never write PLAN.md by hand: copy this prompt, paste it to your agent in this repo, and it draws the component map the board runs on.</p><button class="btn accent" type="button" onclick="copyBackfill()">Copy backfill prompt</button></div>
   </div>`
@@ -534,7 +534,7 @@ function renderRuns(){
   if(M){
     const selfLive=(M.runs||[]).some(r=>!r.ended)
     const hot=M.activity&&Date.now()-M.activity.at<120000
-    if(M.hooksInstalled===false)hint=`<div class="run-card ended" style="cursor:default"><div class="run-task" style="margin-top:0;white-space:normal;color:var(--dim)">Watching file changes. Claude Code and Codex sessions working here appear from their local logs. To also see which terminal each Claude session runs in, run <b style="color:var(--text)">npx agenttrail init</b> here once — local only, gitignored.</div></div>`
+    if(M.hooksInstalled===false)hint=`<div class="run-card ended" style="cursor:default"><div class="run-task" style="margin-top:0;white-space:normal;color:var(--dim)">Watching file changes. Claude Code and Codex sessions working here appear from their local logs. For instant updates and plan reminders, run <b style="color:var(--text)">npx agenttrail init</b> here once — local only, gitignored.</div></div>`
   }
   const past=boards.flatMap(b=>(b.cycles||[]).map(c=>({...c,__project:b.project,__plan:b.plan||[]})))
     .sort((a,c)=>c.start-a.start).slice(0,10)

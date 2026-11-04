@@ -107,7 +107,7 @@ files: [public/**]
   by: claude
 
 ## Watch live runs {#runs}
-tech: claude code hooks adapter — PostToolUse/TodoWrite → POST /events
+tech: Claude Code hooks plus local Claude and Codex log readers — bin/lib/claude.mjs, bin/lib/codex.mjs
 needs: [plan-reader]
 links: [map]
 files: [bin/**, public/**, test/**, .github/workflows/map.yml]
@@ -158,7 +158,7 @@ files: [bin/**, public/**, test/**, .github/workflows/map.yml]
   tech: archiveRun + cycles[] persisted in bin/agenttrail.mjs; Past cycles rows in the dock
   by: claude
 - [x] Sub-agents show as child rows on their parent's run card {#runs-subagents}
-  tech: Task/SubagentStop hooks -> run.subagents in bin/agenttrail.mjs; .run-sub rows
+  tech: Agent or Task calls and SubagentStop hooks -> run.subagents in bin/agenttrail.mjs; .run-sub rows
   by: claude
 ## See the whole fleet {#fleet}
 tech: /summary + /fleet aggregation; zoom-out altitude with live repo cards
@@ -188,74 +188,15 @@ files: [bin/**, public/**]
   by: claude
   tech: overview+detail per the research — status-colored nodes, click to jump
 
-## Show agents cooking together {#kitchen}
-tech: optional kitchen package, local observers, workflow model and Three.js renderer
-files: [packages/kitchen/**]
-links: [plan-reader, runs, map]
-- [ ] Preserve native todos when Map reports newer activity {#kitchen-native-plan-precedence}
-  tech: Projects.enrich currently lets a newer general Map event replace a confirmed native task list with empty board todos and withdraw its dishes.
-- [ ] Confirm plan updates before serving completed dishes {#kitchen-plan-acknowledgements}
-  tech: wait for successful Codex update_plan and legacy TodoWrite results; failed or interrupted calls must retain the last confirmed plan.
-- [x] Bring the runnable kitchen into this repository {#kitchen-import}
-  by: codex
-  from: agent
-- [x] Make the preview install without a graphics build {#kitchen-package}
-  by: codex
-  from: agent
-- [x] Verify the packaged kitchen in a clean folder {#kitchen-package-check}
-  by: codex
-  from: agent
-- [x] Start the kitchen through npm's installed command {#kitchen-bin-launch}
-  by: codex
-  from: agent
-  tech: resolve the executable symlink before detecting the CLI entry point; verify actual npm exec rather than only the underlying file
-- [x] Verify the public install observes a fresh working repo {#kitchen-public-readiness}
-  by: codex
-  from: agent
-  tech: downloaded the exact public alpha.2 archive without GitHub credentials, matched its checksum, launched with a fresh npm cache, and observed this real working repo in the browser. All 71 tests pass. Expanded the package check to verify fresh logs over SSE, one session contributing through multiple chefs, native dish completion, and file observation; the public archive passes it.
-
 ## Ship to GitHub and npm {#ship}
 needs: [map, explorer]
-files: [README.md, docs/**, package.json, CONTRIBUTING.md, examples/**, .github/**]
-- [x] Review reliability and explain the two observability views {#ship-observability-review}
-  by: codex
-  from: agent
-  tech: reproduced four issues using real source modules and an isolated Map server; captured a local review with repro steps and suggested fixes. All 71 existing Kitchen tests pass. README and docs/OBSERVABILITY.md explain Map/Kitchen data sources, roles versus sessions, independent services, setup changes and different privacy policies; fixes remain open under runs and kitchen.
-- [x] Publish the clarified observability guide {#ship-observability-guide}
-  by: codex
-  from: agent
-  tech: PR #12 merged the overview, comparison, source diagram and accurate setup/provider guidance. Verified 38 documentation links and the public main README/guide. All Kitchen CI checks passed on Linux Node 20/22/24 and macOS Node 22. GitHub About now describes the two observability views; runtime findings remain open.
-- [x] Show Kitchen clearly and document the verified setup {#ship-kitchen-readiness-docs}
-  by: codex
-  from: agent
-  tech: merged PR #10 with a Kitchen-first README, public overview and cooking GIF, exact archive install command, browser/editor instructions and troubleshooting. Verified the public main README and media return HTTP 200. All 71 tests plus the expanded package check pass in CI on Linux Node 20/22/24 and macOS Node 22. Native extension, Cursor and Windows validation remain explicit gaps.
-- [x] Explain how to try and contribute to the kitchen {#ship-kitchen-guide}
-  by: codex
-  from: agent
-- [x] Publish a runnable experimental kitchen preview {#ship-kitchen-preview}
-  by: codex
-  from: agent
-  tech: merged via PRs #8 and #9; kitchen-v0.1.0-alpha.2 includes a prebuilt archive and checksum. Public npm exec download, help and cold startup verified.
-- [x] Publish the short kitchen command to npm {#ship-kitchen-registry}
-  by: codex
-  from: agent
-  tech: agenttrail-kitchen@0.1.0-alpha.3 is public under latest. Downloaded it without credentials and matched its integrity and bytes to the tested archive. A fresh-cache npx launch opens a live repo and serves bundled assets without writing to the repo. All 71 tests pass; the public archive passes the installed-package/live-event check.
-- [x] Publish the npm setup and matching release archive {#ship-kitchen-npm-guide}
-  by: codex
-  from: agent
-  tech: PR #11 merged the short command, npm badge, pinned preview instructions and browser/editor limits. All 71 tests and package checks passed on Linux Node 20/22/24 and macOS Node 22. Published kitchen-v0.1.0-alpha.3 with the identical npm archive and SHA-256 checksum, verified its unauthenticated download and the public main README, and linked the new npm release from the older release notes.
-- [x] Show cooking and deliveries through a closer video camera {#ship-kitchen-camera}
-  by: codex
-  from: agent
-  tech: video sub-agent reframed original high-resolution footage into a 26.7-second edit with eased zooms, plate-transfer pans and conveyor tracking; music and silent exports remain local.
-- [x] Propose how to release the kitchen inside Agenttrail {#ship-kitchen-structure}
-  by: codex
-  from: agent
-  tech: package boundaries, shared event model, public preview and announcement in docs/KITCHEN-RELEASE-PLAN.md
-- [x] Plan the companion virtual agent office {#ship-office-plan}
-  by: codex
-  from: agent
-  tech: Research and visual alternatives in ../agent-office; planning only, no runtime changes
+files: [README.md, docs/**, package.json, CONTRIBUTING.md, .github/**]
+- [x] Remove Kitchen and its files from the repository {#ship-retire-kitchen}
+  by: claude
+  tech: packages/kitchen, docs/kitchen, examples/kitchen-workflow and their workflow and issue template removed; local tag kitchen-final marks e4ba2da.
+- [x] Rewrite the docs with Map as the whole product {#ship-map-docs}
+  by: claude
+  tech: README.md, docs/OBSERVABILITY.md, CONTRIBUTING.md, package.json.
 - [x] Public repo and readme {#ship-repo}
   tech: github.com/sodiumsun/agenttrail + README.md
 - [x] Fresh demo gif of the current look {#ship-gif}
