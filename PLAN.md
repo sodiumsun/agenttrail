@@ -110,7 +110,7 @@ files: [public/**]
 tech: claude code hooks adapter — PostToolUse/TodoWrite → POST /events
 needs: [plan-reader]
 links: [map]
-files: [bin/**, public/**]
+files: [bin/**, public/**, test/**, .github/workflows/map.yml]
 - [x] Restrict Map actions to trusted local requests {#runs-request-boundary}
   by: claude
   tech: requestProblem + action token in bin/agenttrail.mjs; test/request-boundary.test.mjs covers foreign Host/Origin, tokens, registered-board proxies, relays and sibling polling.
@@ -126,9 +126,8 @@ files: [bin/**, public/**]
 - [x] Tell two agents in one repo apart by their Herdr terminal {#runs-terminal-id}
   by: claude
   tech: withTerminalId in bin/agenttrail.mjs; run.terminalId, tested in test/hooks.test.mjs.
-- [~] Test Map automatically on every change {#runs-tests}
+- [x] Test Map automatically on every change {#runs-tests}
   by: claude
-  from: agent
   tech: zero-dependency node:test suite in test/, root npm test, .github/workflows/map.yml.
 - [x] Receive hook events and track sessions {#runs-endpoint}
   by: claude
