@@ -252,7 +252,7 @@ describe('Claude runs on the map', () => {
       say(12),
     ])
     // Discovery runs every ten seconds, so these exist from the start, holding one row with no effect.
-    for (const id of ['hook-first', 'log-first', 'interrupted']) log(id, [base(0, 'attachment')])
+    for (const id of ['hook-first', 'hook-covered', 'log-first', 'interrupted']) log(id, [base(0, 'attachment')])
     map = await startMap({ repo: world.repo, home: world.home, base: port })
     await until(() => run('no-hooks'), 'the Claude run')
   })
@@ -300,6 +300,16 @@ describe('Claude runs on the map', () => {
     assert.equal(r.source, 'hook+claude-log')
     assert.deepEqual(r.recentTools.map(t => t.name), ['Read', 'Bash'])
   })
+  test('a log row older than the last hook is skipped, even with nothing to match it', async () => {
+    const id = 'hook-covered'
+    await hook({ hook_event_name: 'PostToolUse', session_id: id, cwd: world.repo, tool_name: 'Bash', tool_input: { command: 'heard by hook' }, tool_response: {} })
+    append(path.join(projects, `${id}.jsonl`), id, [
+      fresh(use(0, 'old', 'Read', { file_path: '/old' }), Date.now() - 5000), fresh(result(0, 'old'), Date.now() - 4000),
+      fresh(use(0, 'new', 'Grep', { pattern: 'new' })), fresh(result(0, 'new'), now() + 1),
+    ])
+    await until(async () => (await run(id))?.recentTools.length >= 2, 'the newer log call')
+    assert.deepEqual((await run(id)).recentTools.map(t => t.name), ['Grep', 'Bash'])
+  })
   test('log first, then hook: the same call is not counted twice, with or without a hook id', async () => {
     const id = 'log-first'
     append(path.join(projects, `${id}.jsonl`), id, [fresh(prompt(0), Date.now()), fresh(use(0, 'c1', 'Bash', { command: 'ls' }), Date.now()), fresh(result(0, 'c1'), Date.now()), fresh(use(0, 'c2', 'Bash', { command: 'pwd' }), Date.now()), fresh(result(0, 'c2'), Date.now())])
@@ -324,6 +334,8 @@ describe('Claude runs on the map', () => {
     const file = path.join(projects, 'no-hooks.jsonl')
     const before = (await run('no-hooks')).recentTools.length
     await map.stop()
+    const saved = fs.readdirSync(path.join(world.home, '.agenttrail')).filter(f => f.endsWith('.json')).map(f => JSON.parse(fs.readFileSync(path.join(world.home, '.agenttrail', f), 'utf8')))
+    assert.equal(saved.find(st => st.repoPath === world.repo).claudeCursors[file].offset, fs.statSync(file).size)
     append(file, 'no-hooks', [fresh(use(20, 'r1', 'Bash', { command: 'while it was down' }), Date.now()), fresh(result(21, 'r1'), Date.now())])
     map = await startMap({ repo: world.repo, home: world.home, base: port })
     await until(async () => (await run('no-hooks'))?.recentTools.some(t => t.detail === 'while it was down'), 'the missed call')
