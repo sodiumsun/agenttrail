@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" role="img" aria-label="Agent Trail mark for light backgrounds">
+  <defs>
+    <mask id="node-holes">
+      <rect width="1000" height="1000" fill="white"/>
+      <circle cx="180" cy="810" r="34" fill="black"/>
+      <circle cx="610" cy="590" r="34" fill="black"/>
+    </mask>
+  </defs>
+  <g fill="#17191F" mask="url(#node-holes)">
+    <path d="M180 810C278 617 363 405 445 180C467 120 535 120 560 180C650 414 733 625 820 810" fill="none" stroke="#17191F" stroke-width="92" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M180 810C300 704 430 646 610 590" fill="none" stroke="#17191F" stroke-width="92" stroke-linecap="round"/>
+    <circle cx="180" cy="810" r="74"/>
+    <circle cx="610" cy="590" r="74"/>
+    <circle cx="820" cy="810" r="74"/>
+  </g>
+  <circle cx="820" cy="810" r="38" fill="#E99A20"/>
+</svg>
