@@ -523,11 +523,11 @@ function renderRuns(){
     const icon=agentIcon(r.agent)
     const key=r.__port+':'+r.id
     return`<div class="run-card ${r.ended?'ended':''} ${openRuns.has(key)?'open':''}" data-run="${esc(key)}">
-      <div class="run-head"><span class="run-agent"><svg viewBox="0 0 24 24"><path fill="${agentColor(r.agent)}" d="${icon||''}"/></svg></span><span class="run-name">${esc(r.agent)}</span><span style="color:var(--faint);font-size:11.5px">· ${esc(r.__project)}</span><span class="run-live-dot"></span><span class="run-elapsed"><span class="t-ago" data-at="${r.startedAt}"></span>${comp?` · in <a href="#" style="color:var(--accent);text-decoration:none" onclick="event.preventDefault();event.stopPropagation();focusComp('${r.__port}:${comp.id}')">${esc(comp.title)}</a>`:''}</span></div>
+      <div class="run-head"><span class="run-agent"><svg viewBox="0 0 24 24"><path fill="${agentColor(r.agent)}" d="${icon||''}"/></svg></span><span class="run-name">${esc(r.agent)}</span><span style="color:var(--faint);font-size:11.5px" title="${r.source==='codex-log'?'Read from the local Codex log':'Sent by Claude Code hooks'}">· ${r.source==='codex-log'?'local log':'hooks'} · ${esc(r.__project)}</span><span class="run-live-dot"></span><span class="run-elapsed"><span class="t-ago" data-at="${r.startedAt}"></span>${comp?` · in <a href="#" style="color:var(--accent);text-decoration:none" onclick="event.preventDefault();event.stopPropagation();focusComp('${r.__port}:${comp.id}')">${esc(comp.title)}</a>`:''}</span></div>
       ${cur?`<div class="run-task">${esc(cur.content)}</div>`:r.ended?`<div class="run-task" style="color:var(--dim)">Idle — waiting for you</div>`:''}
       ${toolLine}
       ${(r.subagents||[]).filter(s=>!s.ended).map(s=>`<div class="run-sub"><span class="run-sub-dot"></span><span class="run-sub-name">${esc(s.name)}</span><span class="run-sub-ago t-ago" data-at="${s.startedAt}"></span></div>`).join('')}
-      <div class="run-detail">${(r.subagents||[]).filter(s=>s.ended).map(s=>`<div class="run-sub ended"><span class="run-sub-tick">✓</span><span class="run-sub-name">${esc(s.name)}</span></div>`).join('')}${todos}${hist?`<div style="margin-top:8px">${hist}</div>`:''}</div>
+      <div class="run-detail">${(r.subagents||[]).filter(s=>s.ended).map(s=>`<div class="run-sub ended"><span class="run-sub-tick">✓</span><span class="run-sub-name">${esc(s.name)}</span></div>`).join('')}${todos||(r.provider==='codex'&&!r.todosUpdatedAt?`<div class="run-hist"><span class="hd">No plan reported in this log</span></div>`:'')}${hist?`<div style="margin-top:8px">${hist}</div>`:''}</div>
     </div>`}).join('')).join('')
   let hint=''
   if(M){

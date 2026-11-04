@@ -27,6 +27,7 @@ flowchart LR
   P --> K["Agenttrail Kitchen"]
   F --> K
   L["Local Codex and Claude logs"] --> K
+  X["Local Codex logs"] --> M
   C["Optional Claude and Cursor hooks"] --> K
   M -. "Available board context" .-> K
 ```
@@ -39,9 +40,9 @@ Provider logs and hooks add session identity, tool activity, lifecycle events an
 | --- | --- | --- |
 | Local file changes | Yes | Yes |
 | Durable `PLAN.md` | Component map and declared progress | Project context and role associations |
-| Codex native activity and plans | No direct adapter; file/plan observation remains available | Experimental local log adapter |
+| Codex native activity and plans | Experimental local log adapter: sessions, tool activity, file trails and `update_plan` lists when the log contains them | Experimental local log adapter |
 | Claude Code session/tool activity | Optional hooks | Local logs and optional hooks |
-| Claude native task lists | Legacy `TodoWrite`; newer `TaskCreate`/`TaskUpdate` are not parsed | Legacy lists and supported modern task results |
+| Claude native task lists | Legacy `TodoWrite` and `TaskCreate`/`TaskUpdate`/`TaskGet`/`TaskList`, applied after the tool succeeds | Legacy lists and supported modern task results |
 | Cursor native activity | No direct adapter; file/plan observation remains available | Optional hooks; native live validation pending |
 | Confirmed artifact transfer | No receipt model; trails may suggest a handoff from timing | Explicit artifact revision and receipt metadata |
 
@@ -64,9 +65,13 @@ A completed dish means a native todo was reported complete. A deployment or publ
 
 ## Current integration limits
 
-Map and Kitchen have not yet consolidated their provider handling. The repository review identified two coexistence bugs: newer Map activity can override Kitchen's native todo list, and Map hook setup can mistake an existing Kitchen hook for its own. Until these are corrected, use Kitchen independently when relying on its native-task display. Running both commands does not guarantee matching task histories.
+Map and Kitchen have not yet consolidated their provider handling. Newer Map activity can still override Kitchen's native todo list, so use Kitchen independently when relying on its native-task display. Running both commands does not guarantee matching task histories. Map's hook setup now recognises its own relay, so either view's hooks can be installed first.
 
-Some legacy plan adapters also accept a proposed list when its tool call starts, before observing a successful result. These need acknowledgement handling so rejected updates cannot look completed. See the open reliability tasks in [PLAN.md](../PLAN.md).
+Map commits a native task change only after a recognised success. A failed, interrupted or unrecognised result keeps the last confirmed list. Kitchen's Codex and legacy plan adapters still accept a proposed list when its tool call starts.
+
+Each Map run says what it knows in `evidence`: lifecycle events and `todos` are reported, tool activity is observed, its component is inferred from `files:` globs, and anything not available is `unknown`. An empty list that was reported is different from a session that never reported one.
+
+Map reads Codex sessions whose working folder is inside the watched repo, from logs touched in the last two hours, and at most the last 2 MiB of each file. Older history in a larger log is not read, and the run's evidence says `history: partial`. Recent Codex versions run tools inside an `exec` wrapper and report most of them as completed items, including file changes. Plans made inside that wrapper do not appear in the log as an `update_plan` call, so those runs show their todos as unknown. Codex runs carry no terminal identity.
 
 ## What stays on your machine
 
@@ -74,7 +79,9 @@ Both services bind to `127.0.0.1`. They require no Agenttrail account, telemetry
 
 Kitchen processes bounded local log data and sends allowlisted activity metadata to its browser. Task titles and project paths can be visible; raw prompts, reasoning, command bodies and arbitrary tool outputs are excluded from that browser feed. Saved repo selection and connector registration live under `~/.agent-office` by default. Its order history is held in memory and reconstructed from available observations after restart.
 
-Map's Claude hook relay sends hook payloads to local Map services. The Map view can show shortened command text, search terms and other tool details, and saves recent activity and cycle summaries under `~/.agenttrail`. It does not have Kitchen's narrower browser-field policy. Check visible details before sharing screenshots or recordings.
+Map's Claude hook relay sends hook payloads to local Map services, and Map reads local Codex logs without writing to them. The Map view can show shortened command text, search terms and other tool details for both, and saves recent activity, cycle summaries and log read positions under `~/.agenttrail`. It does not have Kitchen's narrower browser-field policy. Check visible details before sharing screenshots or recordings.
+
+Map answers only requests with a local `Host`, and rejects any foreign `Origin`. Setup and starting a board also need a token that the Map page receives when it loads; each running board has its own, stored at `~/.agenttrail/tokens/<port>.token` for sibling boards to use. The hook endpoint takes no token, so installed relays keep working; any local process can post events to it, but a web page cannot.
 
 Normal watching does not edit your repo. Explicit Map setup creates plan/instruction files and a `.gitignore` entry, and offers Claude hooks; noninteractive `init` assumes yes. Kitchen's optional **Connect agents** flow writes the reviewed provider hook configuration. Neither view sends agent prompts, approves provider actions or changes native task status.
 

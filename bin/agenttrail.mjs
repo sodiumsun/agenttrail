@@ -10,6 +10,7 @@ import os from 'node:os'
 import crypto from 'node:crypto'
 import { applyTaskEffect, claudeTaskEffect, clean } from './lib/tasks.mjs'
 import { hasMapRelay } from './lib/hooks.mjs'
+import { CodexLogReader } from './lib/codex.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -47,6 +48,9 @@ for (let i = 0; i < argv.length; i++) {
 }
 const planPath = path.join(repo, 'PLAN.md')
 const atDir = path.join(repo, '.agenttrail')
+// Logs record the resolved path; a repo reached through a symlink must still match.
+const repoRoots = [...new Set([repo, (() => { try { return fs.realpathSync(repo) } catch { return repo } })()])]
+const inRepo = p => repoRoots.some(root => p === root || p.startsWith(root + path.sep))
 
 async function askYesNo(q) {
   if (assumeYes || !process.stdin.isTTY) return true
@@ -209,7 +213,7 @@ function rebuildMatchers() {
 }
 function touchComponents(file, at) {
   for (const m of compMatchers) if (m.res.some(re => re.test(file))) {
-    compTouched[m.id] = at
+    compTouched[m.id] = Math.max(compTouched[m.id] || 0, at)
     const arr = compRecent[m.id] || (compRecent[m.id] = [])
     if (arr[0] && arr[0].file === file) arr[0] = { file, at, n: (arr[0].n || 1) + 1 }
     else arr.unshift({ file, at, n: 1 })
@@ -237,11 +241,31 @@ function toolDetail(input = {}) {
 function relToRepo(p) {
   if (!p) return null
   const r = path.resolve(String(p))
-  return r === repo ? '' : r.startsWith(repo + path.sep) ? r.slice(repo.length + 1) : null
+  const root = repoRoots.find(x => r === x || r.startsWith(x + path.sep))
+  return root === undefined ? null : r.slice(root.length + 1)
+}
+function recordTool(run, tool) {
+  run.recentTools.unshift(tool)
+  if (run.recentTools.length > 8) run.recentTools.length = 8
+}
+// A confirmed write by this run: heat the file, and pin the run to its component.
+function noteRunFile(run, rel, at) {
+  heatFile(rel, Math.max(fileHeat[rel] || 0, at))
+  touchComponents(rel, at)
+  if (!activity || at >= activity.at) activity = { file: rel, at }
+  for (const m of compMatchers) if (m.res.some(re => re.test(rel))) {
+    if (run.componentId !== m.id) {
+      (run.path = run.path || []).push({ c: m.id, at })
+      const prev = Object.values(runs).find(r2 => r2.id !== run.id && r2.ended && r2.componentId === m.id && at >= r2.lastEventAt && at - r2.lastEventAt < 10 * 60e3)
+      if (prev) { handoffs.push({ c: m.id, from: prev.agent, to: run.agent, at }); if (handoffs.length > 10) handoffs.shift() }
+    }
+    run.componentId = m.id
+    if (run.path && run.path.length > 20) run.path.shift()
+  }
 }
 function handleHookEvent(ev) {
   const cwd = ev.cwd || ''
-  if (!(cwd === repo || cwd.startsWith(repo + path.sep))) return false
+  if (!inRepo(cwd)) return false
   const run = runFor(ev.session_id || 'session', cwd)
   if (ev.agent) run.agent = run.provider = String(ev.agent).slice(0, 24).toLowerCase()
   const terminalId = clean(ev.hc_terminal_id, 200)
@@ -266,33 +290,40 @@ function handleHookEvent(ev) {
   } else if (kind === 'PostToolUseFailure') {
     run.ended = false
     const started = run.currentTool && run.currentTool.name === ev.tool_name ? run.currentTool.at : Date.now()
-    run.recentTools.unshift({ name: ev.tool_name, detail: toolDetail(ev.tool_input), at: Date.now(), ms: Date.now() - started, error: true })
-    if (run.recentTools.length > 8) run.recentTools.length = 8
+    recordTool(run, { name: ev.tool_name, detail: toolDetail(ev.tool_input), at: Date.now(), ms: Date.now() - started, error: true })
     run.currentTool = null
   } else if (kind === 'PostToolUse') {
     run.ended = false
     const started = run.currentTool && run.currentTool.name === ev.tool_name ? run.currentTool.at : Date.now()
-    run.recentTools.unshift({ name: ev.tool_name, detail: toolDetail(ev.tool_input), at: Date.now(), ms: Date.now() - started })
-    if (run.recentTools.length > 8) run.recentTools.length = 8
+    recordTool(run, { name: ev.tool_name, detail: toolDetail(ev.tool_input), at: Date.now(), ms: Date.now() - started })
     run.currentTool = null
     if (ev.status !== 'error' && ev.status !== 'failed') commitTaskEffect(run, claudeTaskEffect(ev.tool_name, ev.tool_input, ev.tool_response ?? ev.tool_output), Date.now())
     const rel = relToRepo(ev.tool_input && (ev.tool_input.file_path || ev.tool_input.notebook_path))
-    if (rel) {
-      heatFile(rel, Date.now())
-      touchComponents(rel, Date.now())
-      activity = { file: rel, at: Date.now() }
-      for (const m of compMatchers) if (m.res.some(re => re.test(rel))) {
-        if (run.componentId !== m.id) {
-          (run.path = run.path || []).push({ c: m.id, at: Date.now() })
-          const prev = Object.values(runs).find(r2 => r2.id !== run.id && r2.ended && r2.componentId === m.id && Date.now() - r2.lastEventAt < 10 * 60e3)
-          if (prev) { handoffs.push({ c: m.id, from: prev.agent, to: run.agent, at: Date.now() }); if (handoffs.length > 10) handoffs.shift() }
-        }
-        run.componentId = m.id
-        if (run.path && run.path.length > 20) run.path.shift()
-      }
-    }
+    if (rel) noteRunFile(run, rel, Date.now())
   } else return false
   return true
+}
+// Codex has no hook here: its local log is the source, so every time below is
+// the log's own, and an old session replayed at boot does not look live.
+function applyCodexEffect(meta, e) {
+  const run = runs[meta.id] || (runs[meta.id] = { id: meta.id, agent: 'codex', provider: 'codex', source: 'codex-log', cwd: meta.cwd, startedAt: meta.startedAt ?? e.at, lastEventAt: e.at, todos: [], todosUpdatedAt: null, currentTool: null, recentTools: [], componentId: null, ended: false })
+  if (meta.parentId) run.parentId = meta.parentId
+  if (meta.limited) run.historyLimited = true
+  run.lastEventAt = Math.max(run.lastEventAt, e.at)
+  run.timedOut = false
+  stateDirty = true
+  if (e.kind === 'turn-start') { run.ended = false; run.interrupted = false }
+  else if (e.kind === 'turn-end' || e.kind === 'interrupted') { run.ended = true; run.interrupted = e.kind === 'interrupted'; run.currentTool = null }
+  else if (e.kind === 'tool-start') { run.ended = false; run.currentTool = { name: e.name, detail: e.detail, at: e.at, callId: e.callId } }
+  else if (e.kind === 'tasks') commitTaskEffect(run, { replace: e.list }, e.at)
+  else if (e.kind === 'tool-end') {
+    if (e.callId && run.currentTool?.callId === e.callId) run.currentTool = null
+    if (e.record) recordTool(run, { name: e.name, detail: e.detail, at: e.at, ms: e.ms, ...(e.error ? { error: true } : {}) })
+    for (const file of e.files) {
+      const rel = relToRepo(path.resolve(meta.cwd, file))
+      if (rel) noteRunFile(run, rel, e.at)
+    }
+  }
 }
 let cycles = [] // saved history: [{start,end,sessions:[{agent,componentId,tools}]}]
 function archiveRun(r) {
@@ -318,6 +349,7 @@ function describeRun(r) {
     todos: r.todosUpdatedAt ? 'reported' : 'unknown',
     tools: r.currentTool || r.recentTools.length ? 'observed' : 'unknown',
     component: r.componentId ? 'inferred' : 'unknown',
+    ...(r.historyLimited ? { history: 'partial' } : {}),
   }
 }
 function liveRuns() {
@@ -332,6 +364,7 @@ function liveRuns() {
 
 // ---------- observed-state persistence (survives daemon restarts) ----------
 // Lives under ~/.agenttrail keyed by repo path — never touches the repo itself.
+let codexCursors = {} // log file -> read position, saved with the runs built from it
 const stateFile = path.join(os.homedir(), '.agenttrail', crypto.createHash('sha1').update(repo).digest('hex').slice(0, 12) + '.json')
 let stateDirty = false
 function loadState() {
@@ -344,6 +377,7 @@ function loadState() {
     Object.assign(compTouched, st.compTouched || {})
     Object.assign(compRecent, st.compRecent || {})
     Object.assign(fileHeat, st.fileHeat || {})
+    codexCursors = st.codexCursors || {}
   } catch {}
 }
 function saveState() {
@@ -351,7 +385,7 @@ function saveState() {
   stateDirty = false
   try {
     fs.mkdirSync(path.dirname(stateFile), { recursive: true })
-    fs.writeFileSync(stateFile, JSON.stringify({ repoPath: repo, port, activity, recentActivity, compTouched, compRecent, runs, fileHeat, cycles }))
+    fs.writeFileSync(stateFile, JSON.stringify({ repoPath: repo, port, activity, recentActivity, compTouched, compRecent, runs, fileHeat, cycles, codexCursors }))
   } catch {}
 }
 loadState()
@@ -757,6 +791,13 @@ const server = http.createServer((req, res) => {
       .finally(() => { if (!res.writableEnded) res.writeHead(200).end() })
   } else res.writeHead(404).end()
 })
+const codexLogs = new CodexLogReader({
+  codexHome: process.env.CODEX_HOME || path.join(os.homedir(), '.codex'),
+  wants: inRepo,
+  cursors: codexCursors,
+  apply: (meta, effects) => { for (const e of effects) applyCodexEffect(meta, e) },
+})
+const pollCodexLogs = () => codexLogs.poll().then(changed => { if (changed) hookTick() }).catch(() => {})
 let lastHookTick = 0
 function hookTick() {
   const now = Date.now()
@@ -785,6 +826,8 @@ async function firstRunFlow() {
 }
 function onListen() {
   publishActionToken()
+  pollCodexLogs()
+  setInterval(pollCodexLogs, 2000).unref()
   console.log(`agenttrail · ${session.project} · http://localhost:${port}`)
   if (!planText) console.log('no PLAN.md found — run `agenttrail init` in the repo to scaffold one')
   if (openBrowser && !noOpen) {

@@ -120,14 +120,14 @@ files: [bin/**, public/**]
 - [x] Show current Claude task lists on run cards, only after the tool succeeded {#runs-modern-tasks}
   by: claude
   tech: claudeTaskEffect in bin/lib/tasks.mjs covers TaskCreate/TaskUpdate/TaskGet/TaskList and TodoWrite; test/tasks.test.mjs.
-- [~] Follow Codex sessions in a watched repo as Map runs {#runs-codex}
+- [x] Follow Codex sessions in a watched repo as Map runs {#runs-codex}
   by: claude
-  from: agent
-  tech: bin/lib/codex.mjs reads ~/.codex/sessions read-only, bounded to the file tail, cursors saved with runs.
+  tech: CodexLogReader in bin/lib/codex.mjs reads ~/.codex/sessions read-only, bounded to the file tail, cursors saved with runs; test/codex.test.mjs.
 - [x] Tell two agents in one repo apart by their Herdr terminal {#runs-terminal-id}
   by: claude
   tech: withTerminalId in bin/agenttrail.mjs; run.terminalId, tested in test/hooks.test.mjs.
-- [ ] Test Map automatically on every change {#runs-tests}
+- [~] Test Map automatically on every change {#runs-tests}
+  by: claude
   from: agent
   tech: zero-dependency node:test suite in test/, root npm test, .github/workflows/map.yml.
 - [x] Receive hook events and track sessions {#runs-endpoint}

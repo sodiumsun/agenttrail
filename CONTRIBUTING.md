@@ -12,6 +12,7 @@ Agenttrail provides local observability for AI coding agents through two views: 
 | Provider adapters and workflow state | `packages/kitchen/src/` |
 | Kitchen scene, characters and interface | `packages/kitchen/public/src/` |
 | Kitchen automated checks | `packages/kitchen/test/` |
+| Map automated checks | `test/`, run with `npm test` from the repo root |
 
 The views currently have separate local services. The kitchen can read the map's local board context; it also has standalone observation. Consolidating the duplicated parsers and adapters is future work. Keep provider interpretation out of the scene renderer so future themes can reuse the evidence model.
 

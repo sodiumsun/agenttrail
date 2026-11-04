@@ -1,0 +1,39 @@
+name: Map
+
+on:
+  push:
+    paths:
+      - 'bin/**'
+      - 'public/**'
+      - 'test/**'
+      - 'package.json'
+      - '.github/workflows/map.yml'
+  pull_request:
+    paths:
+      - 'bin/**'
+      - 'public/**'
+      - 'test/**'
+      - 'package.json'
+      - '.github/workflows/map.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+        os: [ubuntu-latest]
+        include:
+          - node: 22
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --check bin/agenttrail.mjs
+      - run: npm test

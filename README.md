@@ -98,7 +98,7 @@ npx agenttrail
 
 ![Agenttrail Map showing live sessions, component progress and file changes](docs/demo.gif)
 
-The Map combines declared intent in `PLAN.md` with observed file changes. A completed component lights up when its files change again. Claude Code hooks add session and tool activity plus legacy `TodoWrite` lists. Map does not yet parse Claude's newer `TaskCreate`/`TaskUpdate` lists. Codex, Cursor and other tools contribute through file observation and the shared plan convention; their native session adapters currently belong to Kitchen.
+The Map combines declared intent in `PLAN.md` with observed file changes. A completed component lights up when its files change again. Claude Code hooks add session and tool activity plus task lists, both `TaskCreate`/`TaskUpdate` and legacy `TodoWrite`. Codex sessions in the repo are read from local logs. Cursor and other tools contribute through file observation and the shared plan convention.
 
 For the full component map, run `npx agenttrail init`, review the setup, then give your agent the backfill prompt from the board. It adds the convention to `CLAUDE.md` and `AGENTS.md`, creates a starter plan, offers local Claude Code hooks, and adds `.agenttrail/` to `.gitignore`. **Setup writes these files; normal watching does not.** In an interactive terminal, starting Map without a plan also offers this setup. Noninteractive `init` assumes yes, so run it only when you intend to configure the repo.
 
@@ -153,7 +153,7 @@ Rebuild after frontend changes. The source, tests, original scene assets and thi
 
 ## Local by construction
 
-Both services bind to **127.0.0.1**. No account, telemetry, transcript upload, model calls or cloud service is required. Fonts and graphics are available locally. Kitchen reads bounded local metadata and sends only allowlisted activity fields to its browser. Map's Claude hook view can display shortened command text, search terms and other tool details, and saves recent activity under `~/.agenttrail`. Review visible task titles, paths and tool details before sharing a recording. [Data sources and local storage](docs/OBSERVABILITY.md#what-stays-on-your-machine)
+Both services bind to **127.0.0.1**. No account, telemetry, transcript upload, model calls or cloud service is required. Fonts and graphics are available locally. Kitchen reads bounded local metadata and sends only allowlisted activity fields to its browser. Map's run view can display shortened command text, search terms and other tool details from Claude hooks and Codex logs, and saves recent activity under `~/.agenttrail`. Review visible task titles, paths and tool details before sharing a recording. [Data sources and local storage](docs/OBSERVABILITY.md#what-stays-on-your-machine)
 
 The Map is a dependency-free Node daemon and a static page. Kitchen is a separate package with a bundled Three.js frontend. Neither controls your agents, sends prompts, approves actions or marks their tasks complete.
 
