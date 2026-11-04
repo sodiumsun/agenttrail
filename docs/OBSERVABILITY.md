@@ -54,6 +54,10 @@ Map reads sessions working inside the watched repo, from logs touched in the las
 
 **Hooks and logs together.** One Claude session is one run, under its session id. Hooks are live, so a log row counts only if it is newer than the last hook heard. That lets the log fill in while Map was down or when hooks are not installed, without counting a call twice. Only hooks supply `terminalId`, and only when the terminal sets `HC_TERMINAL_ID`; log-only runs never have one. Hooks also let Map remind the agent at session start when the plan has fallen behind the code.
 
+## The panel feed
+
+`GET /panel` is a small, versioned, read-only summary for the Herdr panel: each run's status, open task, last tool, recent path, terminal id and evidence, under the same local request checks as every other route. A task is `reported`, a tool `observed` and a path `inferred`. See [herdr/README.md](../herdr/README.md).
+
 ## What stays on your machine
 
 Map binds to `127.0.0.1`. It requires no Agenttrail account, telemetry service, transcript upload or extra model call. The browser uses bundled graphics and system fonts.

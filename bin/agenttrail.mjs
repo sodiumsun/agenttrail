@@ -630,7 +630,9 @@ function summaryModel() {
 }
 function panelModel() {
   return panelFeed({
-    project: session.project, repoPath: repo, port,
+    // The resolved path: Herdr reports a terminal's real folder, so a repo opened
+    // through a symlink would otherwise match nothing.
+    project: session.project, repoPath: repoRoots.at(-1), port,
     hasPlan: planText.length > 0,
     components: parsed.nodes.filter(n => n.level === 'component'),
     runs: liveRuns(),

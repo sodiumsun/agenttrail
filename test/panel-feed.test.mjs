@@ -102,6 +102,18 @@ describe('GET /panel', () => {
   })
 })
 
+describe('a repo opened through a symlink', () => {
+  test('the feed gives the real folder, which is what Herdr reports', async () => {
+    const world = tempWorld()
+    try {
+      const link = path.join(world.root, 'link')
+      fs.symlinkSync(world.repo, link)
+      const map = await startMap({ repo: link, home: world.home, base: await freePortBase() })
+      assert.equal(JSON.parse((await request(map.port, '/panel')).body).repoPath, world.repo)
+    } finally { await stopAll(); world.cleanup() }
+  })
+})
+
 describe('a repo with no plan', () => {
   test('the feed says so and nothing is set up', async () => {
     const world = tempWorld()

@@ -89,6 +89,10 @@ Claude Code hooks are not needed to see a session. They add three things: events
 
 Map reads logs touched in the last two hours and at most the last 2 MiB of each. Cloud sessions with no logs on this machine are not visible. Local log formats can change between agent versions. [How observability works](docs/OBSERVABILITY.md)
 
+## Beside your agents in Herdr
+
+A panel for the [Herdr](https://herdr.dev) desktop app shows each agent's task, its recent path through the project and its status, and jumps to its terminal on a click. It reads Map through a small read-only feed. See [herdr/README.md](herdr/README.md).
+
 ## Local by construction
 
 Map binds to **127.0.0.1**. It needs no account, telemetry, transcript upload, model call or cloud service, and it opens agent logs read-only. Run cards can show shortened command text, search terms and other tool details, and Map saves recent activity under `~/.agenttrail`. Review what is visible before sharing a recording. [Data sources and local storage](docs/OBSERVABILITY.md#what-stays-on-your-machine)

@@ -168,13 +168,17 @@ files: [bin/**, public/**, test/**, herdr/**, .github/workflows/map.yml]
   by: claude
   from: agent
   tech: GET /panel in bin/agenttrail.mjs, shape in bin/lib/panel.mjs, schema 1, behind requestProblem; test/panel-feed.test.mjs
-- [~] Show each agent's trail beside its terminal in Herdr {#herdr-panel}
+- [x] Show each agent's trail beside its terminal in Herdr {#herdr-panel}
   by: claude
   from: agent
-  tech: herdr/agenttrail/mods/agenttrail; pure link, view and feed modules with node:test tests
-- [ ] Write the Herdr recipe, preview and install notes {#herdr-recipe}
+  tech: herdr/agenttrail/mods/agenttrail; pure link.js, view.js, feed.js with test/herdr-panel.test.mjs; seen rendering in a separate Herdr instance
+- [x] Write the Herdr recipe, preview and install notes {#herdr-recipe}
+  by: claude
   from: agent
-  tech: herdr/agenttrail/RECIPE.md in Herdr's six-part order; herdr/README.md
+  tech: herdr/agenttrail/RECIPE.md in Herdr's six-part order; herdr/agenttrail/preview.png; herdr/README.md
+- [ ] List the panel on herdr.dev once its Map is on npm {#herdr-list}
+  from: agent
+  tech: publish a Map with /panel first; then main-branch merge and the herdr-mod repo topic; owner's call
 
 ## See the whole fleet {#fleet}
 tech: /summary + /fleet aggregation; zoom-out altitude with live repo cards
