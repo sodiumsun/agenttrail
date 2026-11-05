@@ -16,7 +16,7 @@ const FEW_CARDS = 3
 const SLIVER_SHARE = 0.01
 const SAMPLE = 24
 const RECENT = 6
-const TITLE_MAX = 34 // both the page and the mod draw this many characters of a title
+const TITLE_MAX = 28 // both the page and the mod draw this many characters of a title
 
 const folders = (file) => {
   const parts = file.split('/').slice(0, -1)
@@ -96,10 +96,10 @@ function chooseWith(list, { kids, hits, own }, max, share) {
   return kept.length ? kept : [...cards]
 }
 
-// What each chosen folder saw, most commits first. `on` is the branch a commit was found on.
+// What each chosen folder saw, most commits first.
 export function describeAreas(paths, commits) {
   const index = new Map(paths.map((p) => [p, p]))
-  const areas = new Map(paths.map((p) => [p, { path: p, commits: 0, on: new Set(), recent: [], touched: new Map(), rest: paths.some((q) => q !== p && (!p || q.startsWith(`${p}/`))) }]))
+  const areas = new Map(paths.map((p) => [p, { path: p, commits: 0, recent: [], touched: new Map(), rest: paths.some((q) => q !== p && (!p || q.startsWith(`${p}/`))) }]))
   for (const c of [...commits].sort((a, b) => b.ct - a.ct)) {
     const here = new Set()
     for (const file of c.files) {
@@ -112,19 +112,18 @@ export function describeAreas(paths, commits) {
     for (const owner of here) {
       const a = areas.get(owner)
       a.commits += 1
-      if (c.on) a.on.add(c.on)
-      if (a.recent.length < RECENT) a.recent.push({ s: c.s, at: c.ct, ...(c.on ? { on: c.on } : {}) })
+      if (a.recent.length < RECENT) a.recent.push({ s: c.s, at: c.ct, landed: Boolean(c.landed) })
     }
   }
   return [...areas.values()].filter((a) => a.commits)
-    .map(({ on, touched, ...a }) => ({ ...a, branches: on.size, sample: [...touched].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).slice(0, SAMPLE).map(([f]) => f) }))
+    .map(({ touched, ...a }) => ({ ...a, files: touched.size, sample: [...touched].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).slice(0, SAMPLE).map(([f]) => f) }))
     .sort((a, b) => b.commits - a.commits || (a.path < b.path ? -1 : 1))
 }
 
 export const areaId = (path) => `area-${crypto.createHash('sha1').update(path).digest('hex').slice(0, 10)}`
 
 // A path that fits a card: the end of it, since that is the part that tells areas apart.
-function fitPath(path, room) {
+export function fitPath(path, room) {
   if (path.length <= room) return path
   const parts = path.split('/')
   let tail = parts.pop()

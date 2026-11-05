@@ -1,27 +1,26 @@
 // What is really being worked on in a repo with no PLAN.md, read from git across every
 // branch and worktree. A workstream is a branch or worktree with commits of its own, or with
 // an agent session in it. Pure: git-scan.mjs does the reading. A card goes in where a plan's
-// component goes, so the page and the Herdr mod draw it with the code they already have.
+// component goes and a branch's lineage where a plan's `needs` go, so the page and the Herdr
+// mod lay out and draw it with the code a plan uses.
 import crypto from 'node:crypto'
 import path from 'node:path'
-import { IGNORE, MAX_AREAS, TMP_FILE, areaId, areaTitle, chooseAreas, describeAreas, ownerOf } from './areas.mjs'
+import { IGNORE, MAX_AREAS, TMP_FILE, areaId, areaTitle, chooseAreas, describeAreas, fitPath, ownerOf } from './areas.mjs'
 
 export const WINDOWS = [7, 30, 90, 365] // days; a quiet repo widens until it has something to say
 export const ENOUGH_COMMITS = 5
 export const MAX_COMMITS = 4000
+export const MAX_SHAPE = 20000 // commits read for lineage and counts: names cost, parents do not
 export const MAX_STREAMS = 8 // a handful, however many branches a repo keeps
-const STREAM_AREAS = 8 // beside a column of workstreams; a repo with one branch gets MAX_AREAS
-const MAX_LINKS = 2 // connectors from one workstream: its most touched areas, and still followable
-const LINK_SHARE = 0.1 // of a workstream's commits: less than this is passing through
+const STREAM_AREAS = 8 // folders a workstream can name; a repo with one branch gets MAX_AREAS cards
 const SHOWN_COMMITS = 6
 const MAX_FILES = 300 // of one commit: past this it is a bulk move, and more names add nothing
-const TITLE_MAX = 34
+const TOP_LINE = 33 // what a card's top line holds beside its status, in the page and the mod
 const TRUNKS = ['main', 'master', 'trunk'] // beside origin/HEAD, which can be years stale
 
 export const streamId = (key) => `ws-${crypto.createHash('sha1').update(key).digest('hex').slice(0, 10)}`
 const branchName = (ref) => ref.replace(/^refs\/heads\//, '').replace(/^refs\/remotes\/[^/]+\//, '')
 const counted = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`
-const cut = (text, room) => text.length > room ? `${text.slice(0, room - 1)}…` : text
 // A rebase or a cherry-pick changes the hash but keeps these two, so it is the same work.
 const sameWork = (c) => `${c.at}|${c.s}`
 
@@ -100,10 +99,12 @@ function findTips(refs, worktrees, byHash, trunks) {
   return { tips, owners }
 }
 
-// Which workstream each commit belongs to. What reached the trunk has landed. Of the rest, a
-// branch keeps its own first-parent line, the newest tip first, so a branch stacked on
-// another takes only what is new, and an integration branch does not swallow the feature
-// branches merged into it. Then whatever only a merge reaches goes to the tip that merged it.
+// Which workstream each commit belongs to. The trunk's own line belongs to no branch. A branch
+// keeps its first-parent line, the newest tip first, down to the trunk's line or to where
+// another branch starts, so a branch stacked on another takes only what is new, and an
+// integration branch does not swallow the branches merged into it. That holds for work that
+// has since landed too, which is how a card can say how much of it did. Then whatever only a
+// merge reaches goes to the tip that merged it.
 export function assignCommits(byHash, tips, trunkShas) {
   const landed = new Set()
   const stack = [...trunkShas]
@@ -114,16 +115,14 @@ export function assignCommits(byHash, tips, trunkShas) {
     landed.add(sha)
     stack.push(...c.parents)
   }
+  const trunkLine = new Set()
+  for (let sha of trunkShas) while (byHash.has(sha) && !trunkLine.has(sha)) { trunkLine.add(sha); sha = byHash.get(sha).parents[0] }
   const landedWork = new Set([...landed].map((sha) => sameWork(byHash.get(sha))))
   const owner = new Map()
   const order = [...tips].filter((t) => !t.trunk).sort((a, b) => b.ct - a.ct || (a.key < b.key ? -1 : 1))
+  const starts = new Set(order.map((t) => t.sha))
   for (const t of order) {
-    for (let at = t.sha; byHash.has(at) && !landed.has(at) && !owner.has(at);) {
-      const c = byHash.get(at)
-      if (landedWork.has(sameWork(c))) { at = c.parents[0]; continue }
-      owner.set(at, t.key)
-      at = c.parents[0]
-    }
+    for (let at = t.sha; byHash.has(at) && !trunkLine.has(at) && !owner.has(at) && (at === t.sha || !starts.has(at)); at = byHash.get(at).parents[0]) owner.set(at, t.key)
   }
   const walked = new Set()
   for (const t of order) {
@@ -140,6 +139,21 @@ export function assignCommits(byHash, tips, trunkShas) {
   return { landed, landedWork, owner }
 }
 
+// Where a branch left the line it grew from: the workstream that owns the commit below its
+// own, looking through branches with no card, or none when that is the trunk or out of sight.
+export function grewFrom(tip, tips, byHash, owner, shown) {
+  const seen = new Set()
+  for (let t = tip; t && !seen.has(t.key);) {
+    seen.add(t.key)
+    let at = t.sha
+    while (byHash.has(at) && owner.get(at) === t.key) at = byHash.get(at).parents[0]
+    const key = owner.get(at)
+    if (key && shown.has(key) && key !== tip.key) return key
+    t = tips.get(key)
+  }
+  return null
+}
+
 // Cards keep their places between looks at the repo: what was there stays in order, and
 // what is new goes on top. Only the periodic full ranking moves them.
 export function keepOrder(list, order) {
@@ -150,87 +164,132 @@ export function keepOrder(list, order) {
   return [...fresh, ...known]
 }
 
+// The folders a card names, as many as its top line holds.
+export function folderLine(paths, room = TOP_LINE) {
+  const named = paths.filter(Boolean)
+  const line = (n) => `${named.slice(0, n).join(', ')}${named.length > n ? ` +${named.length - n}` : ''}`
+  if (!named.length) return paths.length ? 'Repo root' : ''
+  for (let n = named.length; n > 0; n--) if (line(n).length <= room) return line(n)
+  const more = named.length > 1 ? ` +${named.length - 1}` : ''
+  return `${fitPath(named[0], room - more.length)}${more}`
+}
+
+// `commits` are the window's, with their files. `shape` is the wider history with no files,
+// for what a window would cut short: how much of a branch there is, and where it began.
 // `live` is the worktrees with an agent working in them: those always get a card.
 // `keep` holds the last areas and order, while cards are not yet due to move.
-export function readHistory({ refs, worktrees, commits, originHead = null, live = [], keep = null, days = WINDOWS[0], maxStreams = MAX_STREAMS }) {
-  const byHash = new Map(commits.map((c) => [c.sha, c]))
+export function readHistory({ refs, worktrees, commits, shape = null, originHead = null, live = [], keep = null, days = WINDOWS[0], maxStreams = MAX_STREAMS }) {
+  const byHash = new Map((shape ?? []).map((c) => [c.sha, c]))
+  for (const c of commits) byHash.set(c.sha, c)
   const trunks = trunkNames(refs, originHead, worktrees)
   const { tips, owners } = findTips(refs, worktrees, byHash, trunks)
   const trunkShas = refs.filter((r) => trunks.has(branchName(r.ref))).map((r) => r.sha)
   const { landed, landedWork, owner } = assignCommits(byHash, tips.values(), trunkShas)
+  const hasLanded = (c) => landed.has(c.sha) || landedWork.has(sameWork(c))
   const real = commits.filter((c) => realCommit(c) && (c.files.length || !c.parents.length))
   const trunk = [...tips.values()].filter((t) => t.trunk).sort((a, b) => b.ct - a.ct)[0] ?? null
-  const groups = new Map()
-  const add = (key, c) => { if (!groups.has(key)) groups.set(key, []); groups.get(key).push(c) }
+  const inWindow = new Set()
+  const lines = new Map() // a workstream's commits, whatever the window
+  const add = (key, c) => { if (!lines.has(key)) lines.set(key, []); lines.get(key).push(c) }
   for (const c of real) {
-    const key = landed.has(c.sha) || landedWork.has(sameWork(c)) ? trunk?.key : owner.get(c.sha)
-    c.on = key ? tips.get(key)?.name : undefined
-    if (key) add(key, c)
+    c.landed = hasLanded(c)
+    const key = owner.get(c.sha) ?? (c.landed ? trunk?.key : undefined)
+    if (key) inWindow.add(key)
+  }
+  for (const c of shape ? [...byHash.values()].filter(realCommit) : real) {
+    c.landed = hasLanded(c)
+    if (owner.has(c.sha)) add(owner.get(c.sha), c)
   }
   const liveKeys = new Set(live.map((root) => owners[root]).filter(Boolean))
-  const active = [...tips.values()].filter((t) => groups.has(t.key) || liveKeys.has(t.key)).map((t) => {
-    const own = (groups.get(t.key) ?? []).sort((a, b) => b.ct - a.ct)
-    return { tip: t, own, key: t.key, at: own[0]?.ct ?? 0, live: liveKeys.has(t.key) }
-  })
-  const ranked = active.sort((a, b) => b.live - a.live || b.at - a.at || (a.key < b.key ? -1 : 1))
+  const describe = (t) => {
+    const own = (lines.get(t.key) ?? []).sort((a, b) => b.ct - a.ct)
+    const landedCount = own.filter((c) => c.landed).length
+    return { tip: t, own, key: t.key, at: own[0]?.ct ?? 0, live: liveKeys.has(t.key), landed: landedCount, open: own.length - landedCount }
+  }
+  const active = [...tips.values()].filter((t) => !t.trunk && (inWindow.has(t.key) || liveKeys.has(t.key))).map(describe)
+  const ranked = active.sort((a, b) => b.live - a.live || Boolean(b.open) - Boolean(a.open) || b.at - a.at || (a.key < b.key ? -1 : 1))
   const shown = keepOrder(ranked.slice(0, maxStreams), keep?.order)
 
   const seen = new Set()
   const work = real.filter((c) => { const k = sameWork(c); if (seen.has(k)) return false; seen.add(k); return true })
-  const lone = active.length < 2 && (!active.length || active[0].tip.trunk)
+  const lone = !active.length
   const held = keep?.areas?.length ? describeAreas(keep.areas, work) : []
   const areas = held.length ? held : describeAreas(chooseAreas(work, lone ? MAX_AREAS : STREAM_AREAS), work)
   const index = new Map(areas.map((a) => [a.path, a.path]))
 
-  const streams = shown.map(({ tip, own, at, key, live: isLive }) => {
+  const touched = (own) => {
     const hits = new Map()
-    for (const c of own) for (const p of new Set(c.files.map((f) => ownerOf(index, f)).filter((p) => p !== null))) hits.set(p, (hits.get(p) || 0) + 1)
-    const links = [...hits].filter(([, n]) => n >= Math.max(1, own.length * LINK_SHARE)).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, MAX_LINKS).map(([p]) => p)
-    return {
-      key, id: streamId(key), name: tip.name, at, commits: own.length, live: isLive,
-      recent: own.slice(0, SHOWN_COMMITS).map((c) => ({ s: c.s, at: c.ct })),
-      worktree: tip.worktree, remote: !tip.local, detached: Boolean(tip.detached), trunk: tip.trunk, head: tip.sha,
-      links, sample: [...new Set(own.flatMap((c) => c.files))].slice(0, 24),
-    }
+    // A folder too quiet for an area of its own is still where the work was, so it keeps its name.
+    const folder = (f) => ownerOf(index, f) || (f.includes('/') ? f.slice(0, f.indexOf('/')) : '')
+    for (const c of own) for (const p of new Set(c.files.map(folder))) hits.set(p, (hits.get(p) || 0) + 1)
+    return [...hits].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([p]) => p)
+  }
+  const stream = ({ tip, own, at, key, live: isLive, landed: done }, parent) => ({
+    key, id: streamId(key), name: tip.name, at, commits: own.length, landed: done, live: isLive, parent,
+    recent: own.slice(0, SHOWN_COMMITS).map((c) => ({ s: c.s, at: c.ct, landed: c.landed })),
+    worktree: tip.worktree, remote: !tip.local, detached: Boolean(tip.detached), trunk: tip.trunk, head: tip.sha,
+    folders: touched(own), sample: [...new Set(own.flatMap((c) => c.files))].slice(0, 24),
   })
-  const activeKeys = new Set(active.map((s) => s.key))
+  const shownKeys = new Set(shown.map((s) => s.key))
+  const rootId = trunk ? streamId(trunk.key) : null
+  const streams = shown.map((s) => {
+    const from = grewFrom(s.tip, tips, byHash, owner, shownKeys)
+    return stream(s, from ? streamId(from) : rootId)
+  })
+  if (trunk && !lone) {
+    const own = real.filter((c) => c.landed).sort((a, b) => b.ct - a.ct)
+    streams.unshift(stream({ tip: trunk, own, at: own[0]?.ct ?? 0, key: trunk.key, live: liveKeys.has(trunk.key), landed: own.length }, null))
+  }
+  // Work that all landed takes a spare card, and is only counted if it got one: it is not going on.
+  const going = active.filter((s) => s.open || s.live).length
+  const quietKeys = new Set([...active.filter((s) => s.open || s.live).map((s) => s.key), ...shownKeys, ...(trunk && inWindow.has(trunk.key) ? [trunk.key] : [])])
   return {
     mode: lone ? 'areas' : 'streams', days, streams: lone ? [] : streams, areas,
     worktrees: Object.fromEntries(Object.entries(owners).map(([root, key]) => [root, streamId(key)])),
     counts: {
-      commits: work.length, active: active.length, shown: lone ? 0 : streams.length,
-      worktrees: worktrees.length, quiet: Object.values(owners).filter((k) => !activeKeys.has(k)).length,
+      commits: work.length, active: Math.max(going, shown.length), shown: lone ? 0 : shown.length,
+      worktrees: worktrees.length, quiet: Object.values(owners).filter((k) => !quietKeys.has(k)).length,
     },
   }
 }
 
-const streamTech = (s) => [
-  s.commits ? (s.trunk ? `${counted(s.commits, 'commit')} landed` : counted(s.commits, 'commit')) : 'no new commits',
-  s.remote ? 'remote' : s.detached ? 'detached' : s.worktree ? 'worktree' : '',
-  s.dirty ? `${s.dirty} uncommitted` : '',
-].filter(Boolean).join(' · ')
-
 const card = (fields) => ({ level: 'component', parent: null, needs: [], links: [], files: [], by: '', kind: '', url: '', status: 'pending', derived: true, ...fields })
 const columnsFor = (n) => n < 2 ? 1 : Math.max(2, Math.min(4, Math.ceil(Math.sqrt(n / 2))))
 
-// The same keys parsePlan gives a component, plus `col` for a place on the grid, `commits`
-// with their subjects as written, and `at`. `links` draw a workstream's connectors.
+// A branch's word: nothing here says what done would be, so only git's answer counts.
+const streamMeta = (s) => {
+  if (s.trunk) return s.commits ? `${counted(s.commits, 'commit')} landed` : 'No new commits'
+  if (!s.commits) return 'No new commits'
+  const word = s.landed === s.commits ? 'Complete' : s.landed ? 'Underway' : 'Open'
+  return `${s.landed} of ${counted(s.commits, 'commit')} landed · ${word}`
+}
+const streamCard = (s) => card({
+  id: s.id, title: s.name, sample: s.sample, stream: true, needs: s.parent ? [s.parent] : [],
+  tech: folderLine(s.folders) || (s.worktree ? 'worktree' : 'branch'),
+  meta: streamMeta(s), landed: s.landed, total: s.commits, status: s.commits && s.landed === s.commits ? 'done' : 'pending',
+  flag: [s.remote ? 'remote' : s.detached ? 'detached' : '', s.dirty ? `${s.dirty} uncommitted` : ''].filter(Boolean).join(' · '),
+  commits: s.recent.length ? s.recent : s.last ? [s.last] : [], at: s.at || s.last?.at || 0,
+})
+
+// Parents before their children, so stacked branches line up and their connectors do not cross.
+function treeOrder(streams) {
+  const ids = new Set(streams.map((s) => s.id))
+  const under = (id) => streams.filter((s) => (ids.has(s.parent) ? s.parent : null) === id).flatMap((s) => [s, ...under(s.id)])
+  return under(null)
+}
+
+// The same keys parsePlan gives a component, plus `meta` for the line under the title, `landed`
+// of `total` for its bar, `flag` for its corner, `commits` as written, and `at`. A branch's
+// connector is a `needs`, to what it grew from. A folder has no lineage, so it gets a grid
+// place from `col`, and its bar is its share of the repo's commits.
 export function boardNodes(scan) {
   if (!scan?.mode) return []
-  const streams = scan.mode === 'streams'
-  const columns = streams ? 1 : columnsFor(scan.areas.length)
-  const areaCards = scan.areas.map((a, i) => card({
-    id: areaId(a.path), title: areaTitle(a), path: a.path, col: streams ? 1 : i % columns, sample: a.sample,
-    tech: [counted(a.commits, 'commit'), streams && a.branches ? counted(a.branches, 'branch', 'branches') : ''].filter(Boolean).join(' · '),
-    commits: a.recent, at: a.recent[0]?.at ?? 0,
+  if (scan.mode === 'streams') return treeOrder(scan.streams).map(streamCard)
+  const columns = columnsFor(scan.areas.length)
+  const total = scan.counts?.commits ?? 0
+  return scan.areas.map((a, i) => card({
+    id: areaId(a.path), title: areaTitle(a), path: a.path, col: i % columns, sample: a.sample,
+    tech: counted(a.files, 'file'), meta: `${a.commits} of ${counted(Math.max(total, a.commits), 'commit')} here`,
+    landed: a.commits, total: Math.max(total, a.commits), flag: '', commits: a.recent, at: a.recent[0]?.at ?? 0,
   }))
-  const known = new Set(areaCards.map((a) => a.path))
-  return [
-    ...scan.streams.map((s) => card({
-      id: s.id, title: cut(s.name, TITLE_MAX), col: 0, sample: s.sample, tech: streamTech(s), stream: true,
-      links: s.links.filter((p) => known.has(p)).map(areaId),
-      commits: s.recent.length ? s.recent : s.last ? [s.last] : [], at: s.at || s.last?.at || 0,
-    })),
-    ...areaCards,
-  ]
 }

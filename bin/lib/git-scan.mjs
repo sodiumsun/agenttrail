@@ -4,7 +4,7 @@
 import { execFileSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import { parentPort, workerData } from 'node:worker_threads'
-import { ENOUGH_COMMITS, LOG_FORMAT, MAX_COMMITS, WINDOWS, parseLog, parseRefs, parseWorktrees, readHistory } from './workstreams.mjs'
+import { ENOUGH_COMMITS, LOG_FORMAT, MAX_COMMITS, MAX_SHAPE, WINDOWS, parseLog, parseRefs, parseWorktrees, readHistory } from './workstreams.mjs'
 
 const MAX_IGNORED = 20000
 const DAY = 86400e3
@@ -41,7 +41,9 @@ function scan({ repo, live, keep, print, ignoredDue }) {
   const detached = [...new Set(worktrees.filter((w) => !w.branch && w.head && !branchTips.has(w.head)).map((w) => w.head))]
   const { commits, days } = history(repo, detached, prefix, now)
   const originHead = attempt(() => git(repo, ['symbolic-ref', '-q', 'refs/remotes/origin/HEAD']).trim())
-  const seenHistory = readHistory({ refs, worktrees, commits, originHead, live, keep, days })
+  // Under a subfolder a branch is only the commits that reached it, so the window is all to go on.
+  const shape = prefix ? null : attempt(() => parseLog(git(repo, ['log', '--branches', '--remotes', ...detached, `--max-count=${MAX_SHAPE}`, `--format=${LOG_FORMAT}`])))
+  const seenHistory = readHistory({ refs, worktrees, commits, shape, originHead, live, keep, days })
   // Only for the handful on cards: a walk of every worktree is what this must never do.
   for (const s of seenHistory.streams) {
     if (s.worktree) s.dirty = attempt(() => git(s.worktree, ['status', '--porcelain', '--ignore-submodules=all'], 5000).split('\n').filter(Boolean).length)

@@ -7,7 +7,7 @@ import { h_flex, v_flex } from "gpui-base";
 import { appHome, exec, focused, home, layout, nextCommand, panes, props, run, settings, setShared, shared, spaces } from "herdr";
 import * as fs from "fs/promises";
 import { Feed, POLL_MS, PORT_BASE, focusFolder, repoName } from "./feed.js";
-import { REGION_HEAD, REGION_X, REGION_Y, ago, boardEdges, boardLayout, cardAgents, cardCommits, cardLines, hostOf, inferredNote, kids, liveCard, openingCard, statusLabel, taskDetails, taskIsOpen, touched } from "./graph.js";
+import { REGION_HEAD, REGION_X, REGION_Y, ago, boardEdges, boardLayout, cardAgents, cardCommits, cardFoot, hostOf, inferredNote, kids, liveCard, openingCard, statusLabel, taskDetails, taskIsOpen, touched } from "./graph.js";
 
 const MOD = "agenttrail-map";
 const ASSET = `mods/${MOD}`;
@@ -340,7 +340,7 @@ export default class AgenttrailMap extends View {
   stroke(c, e) {
     const z = this.zoom;
     const { x1, y1, ax, ay, bx, by, x2, y2 } = e.curve;
-    const style = { need: [1.5, null, c.line], active: [1.5, [5, 8], c.accent], link: this.feed.board.derived ? [1.25, null, c.faint] : [1.5, [2, 7], c.faint + "cc"], handoff: [2.5, [9, 7], agentColor(c, e.agent ?? "")] }[e.kind];
+    const style = { need: [1.5, null, c.line], active: [1.5, [5, 8], c.accent], link: [1.5, [2, 7], c.faint + "cc"], handoff: [2.5, [9, 7], agentColor(c, e.agent ?? "")] }[e.kind];
     const [width, dash, color] = style;
     let path = PathBuilder.stroke(width);
     if (dash) path = path.dash_array(dash);
@@ -414,54 +414,31 @@ export default class AgenttrailMap extends View {
     return box(div()).flex().items_center().justify_center().text_size(11 * z).font_weight(700).font_family(SANS).text_color(agentColor(c, name)).child(String(name)[0].toUpperCase());
   }
 
-  // A card from git: a workstream, or a code area. What was committed there and who is on
-  // it, and no progress, since nothing says what done would be.
-  gitCard(c, b, p, pos, now) {
-    const z = this.zoom, w = pos.nodeW, h = pos.nodeH;
-    const open = pos.h > h;
-    const live = touched(p, now);
-    const names = cardAgents(b, p);
-    const { first, second, working, age } = cardLines(b, p, (at) => ago(at, now));
-    const edge = open ? c.accent : working ? c.success : c.line;
-    return div().id(`n-${p.id}`).absolute()
-      .left(this.pan.x + (REGION_X + pos.nodeX) * z).top(this.pan.y + (REGION_Y + REGION_HEAD + pos.nodeY) * z).w(w * z).h(h * z)
-      .rounded(12 * z).bg(c.card).border(open || working ? 1.5 : 1).border_color(edge).cursor_pointer()
-      .hover((s) => s.bg(c.cardHover).border_color(open ? edge : c.faint))
-      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .on_click((_e, cx) => { this.toggle(p); cx.notify(); })
-      .child(this.text(p.tech, { x: 16, y: 24, size: 11, color: c.faint, mono: true, weight: 500 }))
-      .when(live, (el) => el
-        .child(svg(`${ASSET}/arc-live.svg`).absolute().left((w - 41) * z).top(11 * z).w(30 * z).h(30 * z).text_color(c.accent).spin(1300))
-        .child(this.text("Editing", { right: 44 + 24 * Math.min(names.length, 3), y: 30, size: 11, color: c.accent, weight: 600 })))
-      .children(names.map((n, i) => this.agentMark(c, n, w - 26 - 24 * (i + 1), 26, 13)))
-      .child(this.text(p.title, { x: 16, y: 52, size: 15, color: c.text, weight: 600 }))
-      .child(this.text(first, { x: 16, y: 76, size: 12, color: c.soft }))
-      .when(Boolean(second), (el) => el.child(this.text(second, { x: 16, y: 96, size: 12, color: working ? c.success : c.dim })))
-      .child(this.text(open ? "HIDE COMMITS ↑" : "SHOW COMMITS ↓", { x: 16, y: 116, size: 11, color: open ? c.accent : c.faint, mono: true, weight: 500 }))
-      .when(Boolean(age), (el) => el.child(this.text(age, { right: 16, y: 116, size: 11, color: c.faint, mono: true })));
-  }
-
   // Its latest commits, for a card someone opened.
   gitDetail(c, p, pos, now) {
     const z = this.zoom;
     const x = this.pan.x + (REGION_X + pos.x) * z, y = this.pan.y + (REGION_Y + REGION_HEAD + pos.nodeY + pos.nodeH + 24) * z;
-    const dot = () => div().w(6 * z).h(6 * z).rounded(6 * z).bg(c.faint); // an element can go in one place only
+    const tail = (a) => h_flex().flex_none().gap(8 * z).items_center()
+      .when(Boolean(a.landed), (el) => el.child(div().h(22 * z).px(8 * z).rounded(22 * z).bg(c.completeBg).text_color(c.completeText).text_size(11 * z).flex().items_center().child("Landed")))
+      .child(div().text_size(12 * z).text_color(c.dim).child(ago(a.at, now)));
     const list = cardCommits(p);
     return [
       div().absolute().left(x + pos.nodeW / 2 * z).top(y - 24 * z).w(1).h(24 * z).bg(c.faint),
       div().id(`d-${p.id}`).absolute().left(x).top(y).w(pos.detailW * z).h(pos.detailH * z).rounded(16 * z).bg(c.surface).overflow_hidden()
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .children(list.length
-          ? list.map((a, i) => this.plainRow(c, i * 45, dot(), a.s, div().flex_none().text_size(12 * z).text_color(c.dim).child(ago(a.at, now))))
+          ? list.map((a, i) => this.plainRow(c, i * 45, this.rowMarker(c, a.landed ? "done" : "pending", String(i + 1)), a.s, tail(a)))
           : [this.text("No commits in this window.", { x: 16, y: 38, size: 12, color: c.dim })]),
     ];
   }
 
   card(c, b, p, pos, now) {
-    if (p.derived) return this.gitCard(c, b, p, pos, now);
     const z = this.zoom, w = pos.nodeW, h = pos.nodeH;
     const list = kids(b, p.id);
-    const done = list.filter((n) => n.status === "done").length;
+    const done = p.derived ? p.landed : list.filter((n) => n.status === "done").length;
+    const total = p.derived ? p.total : list.length; // a card from git counts commits, the rest of it is a plan's
+    const unit = p.derived ? "COMMITS" : "TASKS";
+    const foot = p.derived ? cardFoot(p, (at) => ago(at, now)) : "";
     const open = pos.h > h;
     const live = touched(p, now);
     const tint = p.kind === "knowledge" ? c.knowledge : p.kind === "human" ? c.human : c.accent;
@@ -489,10 +466,11 @@ export default class AgenttrailMap extends View {
         .when(Boolean(recent), (e2) => e2.child(this.text(`${recent.file.split("/").pop()}${recent.n > 1 ? ` ×${recent.n}` : ""} · ${ago(recent.at, now)}`, { right: 16, y: 76, size: 11, color: tint, mono: true }))))
       .children(names.map((n, i) => this.agentMark(c, n, w - 26 - 24 * (i + 1), 26, 13)))
       .child(this.text(label, { x: 16, y: 52, size: 15, color: c.text, weight: 600 }))
-      .child(this.text(`${done} of ${list.length} tasks · ${p.status === "pending" && done > 0 ? "Underway" : statusLabel(p.status)}`, { x: 16, y: 76, size: 12, color: c.dim }))
+      .child(this.text(p.meta ?? `${done} of ${list.length} tasks · ${p.status === "pending" && done > 0 ? "Underway" : statusLabel(p.status)}`, { x: 16, y: 76, size: 12, color: c.dim }))
       .child(div().absolute().left(16 * z).top(92 * z).w(barW).h(4 * z).rounded(2 * z).bg(c.hover))
-      .child(div().absolute().left(16 * z).top(92 * z).w(list.length ? barW * done / list.length : 0).h(4 * z).rounded(2 * z).bg(p.status === "active" ? c.accent : c.soft))
-      .child(this.text(open ? "HIDE TASKS ↑" : "SHOW TASKS ↓", { x: 16, y: 116, size: 11, color: open ? c.accent : c.faint, mono: true, weight: 500 }))
+      .child(div().absolute().left(16 * z).top(92 * z).w(total ? barW * done / total : 0).h(4 * z).rounded(2 * z).bg(p.status === "active" ? c.accent : c.soft))
+      .child(this.text(open ? `HIDE ${unit} ↑` : `SHOW ${unit} ↓`, { x: 16, y: 116, size: 11, color: open ? c.accent : c.faint, mono: true, weight: 500 }))
+      .when(Boolean(foot), (el) => el.child(this.text(foot, { right: 16, y: 116, size: 11, color: c.faint, mono: true })))
       .when(hasPlan, (el) => el.child(this.text("SESSION PLAN", { right: 16, y: 116, size: 10, color: "#e08bb8", mono: true, weight: 700 })))
       .children(ports);
   }

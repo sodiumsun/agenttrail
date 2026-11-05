@@ -9,8 +9,8 @@ import path from 'node:path'
 import { after, describe, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { areaId, areaTitle, chooseAreas, describeAreas, ownerOf } from '../bin/lib/areas.mjs'
-import { assignCommits, boardNodes, keepOrder, parseLog, parseRefs, parseWorktrees, readHistory, streamId } from '../bin/lib/workstreams.mjs'
-import { boardEdges, boardLayout, cardLines, detailHeight, inferredNote, isUnfolded, liveCard, openingCard } from '../herdr/agenttrail-map/mods/agenttrail-map/graph.js'
+import { assignCommits, boardNodes, folderLine, keepOrder, parseLog, parseRefs, parseWorktrees, readHistory, streamId } from '../bin/lib/workstreams.mjs'
+import { boardEdges, boardLayout, cardFoot, detailHeight, inferredNote, isUnfolded, liveCard, openingCard } from '../herdr/agenttrail-map/mods/agenttrail-map/graph.js'
 import { freePortBase, startMap, stopAll, tempDir, tempWorld, until } from './helpers.mjs'
 import { hits, scan } from './leak-scan.mjs'
 
@@ -100,15 +100,15 @@ describe('choosing areas', () => {
     assert.equal(ownerOf(index, 'src/ui/x/a.js'), 'B')
     assert.equal(ownerOf(index, 'src/a.js'), 'A')
     assert.equal(ownerOf(index, 'lib/a.js'), null)
-    const c = { ...commit('two files', ['src/a.js', 'src/b.js']), on: 'x' }
+    const c = commit('two files', ['src/a.js', 'src/b.js'])
     const [area] = describeAreas(['src'], [c])
-    assert.deepEqual([area.commits, area.branches, area.recent[0].s], [1, 1, 'two files'])
+    assert.deepEqual([area.commits, area.files, area.recent[0].s], [1, 2, 'two files'])
   })
 
   test('titles are real paths: long ones keep their end, and a part left over says so', () => {
     assert.equal(areaTitle({ path: 'src', rest: true }), 'src (rest)')
     const long = areaTitle({ path: 'very/long/nested/folder/that/goes/on/and/on/here' })
-    assert.ok(long.startsWith('…/') && long.endsWith('here') && long.length <= 34)
+    assert.ok(long.startsWith('…/') && long.endsWith('here') && long.length <= 28)
   })
 })
 
@@ -126,15 +126,17 @@ describe('who owns a commit', () => {
   test('a rebased or cherry-picked commit counts as landed, by its author time and subject', () => {
     const onTrunk = commit('same work'), copy = { ...onTrunk, sha: 'copy', ct: NOW + 5 }, mine = { ...commit('new work'), parents: ['copy'] }
     copy.parents = []
-    const { owner } = owned([mine, copy, onTrunk], [{ key: 'x', sha: mine.sha, ct: mine.ct }], [onTrunk.sha])
-    assert.deepEqual([...owner.keys()], [mine.sha])
+    const { owner, landedWork } = owned([mine, copy, onTrunk], [{ key: 'x', sha: mine.sha, ct: mine.ct }], [onTrunk.sha])
+    assert.deepEqual([...owner.keys()], [mine.sha, 'copy'], 'the branch still made it, which is how its card counts it as landed')
+    assert.ok(landedWork.has(`${copy.at}|${copy.s}`))
   })
 
   test('a stacked branch takes only what is new', () => {
     const [top, mid, low] = line(commit('top'), commit('mid'), commit('low'))
     const { owner } = owned([top, mid, low], [{ key: 'upper', sha: top.sha, ct: 2 }, { key: 'lower', sha: mid.sha, ct: 1 }], [])
     assert.equal(owner.get(top.sha), 'upper')
-    assert.equal(owner.get(low.sha), 'upper')
+    assert.equal(owner.get(mid.sha), 'lower')
+    assert.equal(owner.get(low.sha), 'lower')
   })
 
   test('an integration branch does not swallow the branches merged into it, only orphans', () => {
@@ -162,16 +164,16 @@ describe('choosing workstreams', () => {
       commits: [...a, ...b, trunkBase],
     })
     assert.equal(out.mode, 'streams')
-    assert.deepEqual(out.streams.map(s => [s.name, s.commits, s.worktree]), [['alpha', 3, '/w/alpha'], ['beta', 2, null], ['main', 1, '/r']])
-    assert.deepEqual(out.streams[0].recent.map(c => c.s), ['alpha 0', 'alpha 1', 'alpha 2'])
+    assert.deepEqual(out.streams.map(s => [s.name, s.commits, s.worktree]), [['main', 1, '/r'], ['alpha', 3, '/w/alpha'], ['beta', 2, null]])
+    assert.deepEqual(out.streams[1].recent.map(c => c.s), ['alpha 0', 'alpha 1', 'alpha 2'])
   })
 
   test('many branches reduce to a handful, newest first, and the rest are counted', () => {
     const lots = Array.from({ length: 30 }, (_, i) => branch(`b${i}`, 1, i + 1))
     const out = readHistory({ refs: [head('main', trunkBase.sha), ...lots.map((l, i) => head(`b${i}`, l[0].sha))], worktrees: [tree('/r', 'main', trunkBase.sha)], commits: [...lots.flat(), trunkBase] })
-    assert.equal(out.streams.length, 8)
-    assert.equal(out.streams[0].name, 'b0')
-    assert.deepEqual([out.counts.active, out.counts.shown], [31, 8])
+    assert.equal(out.streams.filter(s => !s.trunk).length, 8)
+    assert.equal(out.streams[1].name, 'b0')
+    assert.deepEqual([out.counts.active, out.counts.shown], [30, 8])
   })
 
   test('a live session always gets its card, even on a branch with no new commits', () => {
@@ -181,8 +183,8 @@ describe('choosing workstreams', () => {
       worktrees: [tree('/r', 'main', trunkBase.sha), tree('/w/old', 'old', 'gone')],
       commits: [...lots.flat(), trunkBase], live: ['/w/old'],
     })
-    assert.equal(out.streams[0].name, 'old')
-    assert.equal(out.streams[0].commits, 0)
+    assert.equal(out.streams[1].name, 'old')
+    assert.equal(out.streams[1].commits, 0)
     assert.equal(out.worktrees['/w/old'], streamId('old'))
   })
 
@@ -237,16 +239,22 @@ describe('choosing workstreams', () => {
     assert.ok(nodes.every(p => p.commits.length === 1 && !p.stream))
   })
 
-  test('connectors run to a workstream\'s most touched areas, and only real ones', () => {
+  test('a card names the folders it touched, as many as its top line holds', () => {
     const files = (names) => names.map(f => `${f}/x.js`)
     const main = commit('base', ['zzz/x.js'])
-    const list = line(...Array.from({ length: 20 }, (_, i) => commit(`w${i}`, files(i < 19 ? ['a', 'b', 'c', 'd'] : ['once']))), main)
+    const list = line(...Array.from({ length: 21 }, (_, i) => commit(`w${i}`, files([['aa', 'bb', 'cc'][i % 3]]))), main)
     const out = readHistory({ refs: [head('main', main.sha), head('w', list[0].sha)], worktrees: [tree('/r', 'main', main.sha)], commits: list })
-    const nodes = boardNodes(out)
-    const stream = nodes.find(p => p.stream && p.title === 'w')
-    assert.ok(stream.links.length > 0 && stream.links.length <= 2)
-    assert.ok(stream.links.every(id => nodes.some(p => p.id === id && p.path != null)))
-    assert.ok(!stream.links.includes(areaId('once')))
+    const stream = boardNodes(out).find(p => p.title === 'w')
+    assert.equal(stream.tech, 'aa, bb, cc')
+    const solo = commit('off on its own', ['rare/x.js'])
+    solo.parents = [main.sha]
+    const side = readHistory({ refs: [head('main', main.sha), head('w', list[0].sha), head('solo', solo.sha)], worktrees: [tree('/r', 'main', main.sha)], commits: [...list, solo] })
+    assert.equal(boardNodes(side).find(p => p.title === 'solo').tech, 'rare', 'too quiet for an area, and still not the repo root')
+    assert.equal(folderLine(['a/one', 'b/two', 'c/three'], 15), 'a/one, b/two +1')
+    assert.equal(folderLine(['a/very/long/folder/name/here', 'b'], 16), '…/name/here +1')
+    assert.equal(folderLine(['', 'src']), 'src')
+    assert.equal(folderLine(['']), 'Repo root')
+    assert.equal(folderLine([]), '')
   })
 
   test('cards hold their places between full rankings, and new work goes on top', () => {
@@ -255,29 +263,138 @@ describe('choosing workstreams', () => {
     assert.deepEqual(keepOrder([s('b'), s('a')], null).map(x => x.key), ['b', 'a'])
   })
 
+  const refsOf = (...pairs) => pairs.map(([name, sha]) => head(name, sha))
+  const on = (name, parent, n = 1, at = 1) => {
+    const list = []
+    for (let i = n - 1; i >= 0; i--) list.unshift({ ...commit(`${name} ${i}`, [`${name}/x.js`], { ct: NOW - at * HOUR - i }), parents: [(list[0] ?? parent).sha] })
+    return list
+  }
+  const merge = (first, second) => ({ ...commit('merge'), parents: [first.sha, second.sha], files: [] })
+  const nodesOf = (out) => Object.fromEntries(boardNodes(out).map(p => [p.title, p]))
+  const trunkTree = (sha) => tree('/r', 'main', sha)
+
+  test('a branch connects to the branch it grew out of, and the rest to the trunk', () => {
+    const a = on('a', trunkBase, 3, 3), b = on('b', a[0], 2, 1), c = on('c', trunkBase, 1, 2)
+    const n = nodesOf(readHistory({ refs: refsOf(['main', trunkBase.sha], ['a', a[0].sha], ['b', b[0].sha], ['c', c[0].sha]), worktrees: [trunkTree(trunkBase.sha)], commits: [...a, ...b, ...c, trunkBase] }))
+    assert.deepEqual(n.b.needs, [n.a.id])
+    assert.deepEqual(n.a.needs, [n.main.id])
+    assert.deepEqual(n.c.needs, [n.main.id])
+    assert.deepEqual(n.main.needs, [])
+    assert.deepEqual([n.a.total, n.b.total], [3, 2], 'stacked work stays with the branch that made it')
+  })
+
+  test('a branch off the middle of another still grew out of it', () => {
+    const a = on('a', trunkBase, 3, 1), b = on('b', a[2], 1, 2)
+    const n = nodesOf(readHistory({ refs: refsOf(['main', trunkBase.sha], ['a', a[0].sha], ['b', b[0].sha]), worktrees: [trunkTree(trunkBase.sha)], commits: [...a, ...b, trunkBase] }))
+    assert.deepEqual(n.b.needs, [n.a.id])
+  })
+
+  test('a merge is not lineage: a branch an integration branch took in still grew from the trunk', () => {
+    const f = on('f', trunkBase, 2, 3), g = on('g', trunkBase, 1, 2)
+    const m = merge(g[0], f[0])
+    const n = nodesOf(readHistory({ refs: refsOf(['main', trunkBase.sha], ['f', f[0].sha], ['integ', m.sha]), worktrees: [trunkTree(trunkBase.sha)], commits: [m, ...f, ...g, trunkBase] }))
+    assert.deepEqual(n.f.needs, [n.main.id])
+    assert.deepEqual(n.integ.needs, [n.main.id])
+  })
+
+  test('lineage looks through a branch with no card, and never at one that is not there', () => {
+    const a = on('a', trunkBase, 1, 1), mid = on('mid', a[0], 1, 90), b = on('b', mid[0], 1, 2)
+    const fill = Array.from({ length: 3 }, (_, i) => on(`z${i}`, trunkBase, 1, 3 + i))
+    const n = nodesOf(readHistory({
+      refs: refsOf(['main', trunkBase.sha], ['a', a[0].sha], ['mid', mid[0].sha], ['b', b[0].sha], ...fill.map((l, i) => [`z${i}`, l[0].sha])),
+      worktrees: [trunkTree(trunkBase.sha)], commits: [...a, ...mid, ...b, ...fill.flat(), trunkBase], maxStreams: 5,
+    }))
+    assert.ok(!n.mid)
+    assert.deepEqual(n.b.needs, [n.a.id])
+    const lost = on('lost', { sha: 'beyond-sight' }, 1, 1)
+    const m = nodesOf(readHistory({ refs: refsOf(['main', trunkBase.sha], ['lost', lost[0].sha]), worktrees: [trunkTree(trunkBase.sha)], commits: [...lost, trunkBase] }))
+    assert.deepEqual(m.lost.needs, [m.main.id], 'with the fork out of sight it falls back to the trunk')
+  })
+
+  test('with no trunk there is no root card, and nothing is drawn to it', () => {
+    const a = on('a', trunkBase, 1, 1), b = on('b', trunkBase, 1, 2)
+    const n = nodesOf(readHistory({ refs: refsOf(['a', a[0].sha], ['b', b[0].sha]), worktrees: [tree('/r', null, a[0].sha)], commits: [...a, ...b, trunkBase] }))
+    assert.deepEqual(Object.keys(n).sort(), ['a', 'b'])
+    assert.deepEqual(n.a.needs, [], 'the newest keeps the base they share')
+    assert.deepEqual(n.b.needs, [n.a.id])
+  })
+
+  test('the bar is the share of a branch\'s commits that reached the trunk', () => {
+    const a = on('a', trunkBase, 3, 5)
+    const later = on('a2', a[0], 2, 1)
+    const onMain = on('m', trunkBase, 1, 4)
+    const landing = merge(onMain[0], a[0]) // the first three went in, then two more came
+    const out = readHistory({ refs: refsOf(['main', landing.sha], ['a', later[0].sha]), worktrees: [trunkTree(landing.sha)], commits: [landing, ...later, ...a, ...onMain, trunkBase] })
+    const n = nodesOf(out)
+    assert.deepEqual([n.a.landed, n.a.total, n.a.status], [3, 5, 'pending'])
+    assert.equal(n.a.meta, '3 of 5 commits landed · Underway')
+    assert.equal(n.main.meta, '5 commits landed')
+    assert.deepEqual(n.a.commits.map(c => c.landed), [false, false, true, true, true])
+  })
+
+  test('nothing landed is an empty bar, and all of it landed is complete', () => {
+    const a = on('a', trunkBase, 2, 3), b = on('b', trunkBase, 2, 2)
+    const landing = merge(trunkBase, b[0])
+    const n = nodesOf(readHistory({ refs: refsOf(['main', landing.sha], ['a', a[0].sha], ['b', b[0].sha]), worktrees: [trunkTree(landing.sha)], commits: [landing, ...a, ...b, trunkBase] }))
+    assert.deepEqual([n.a.landed, n.a.total, n.a.status, n.a.meta], [0, 2, 'pending', '0 of 2 commits landed · Open'])
+    assert.deepEqual([n.b.landed, n.b.total, n.b.status, n.b.meta], [2, 2, 'done', '2 of 2 commits landed · Complete'])
+  })
+
+  test('a rebased branch that landed counts as landed, by its author time and subject', () => {
+    const a = on('a', trunkBase, 2, 2)
+    const copies = a.map((c, i) => ({ ...c, sha: `copy-${i}`, ct: NOW - 1000, parents: [i ? `copy-${i - 1}` : trunkBase.sha] }))
+    const n = nodesOf(readHistory({ refs: refsOf(['main', copies[1].sha], ['a', a[0].sha]), worktrees: [trunkTree(copies[1].sha)], commits: [...copies, ...a, trunkBase] }))
+    assert.equal(n.a.landed, 2)
+  })
+
+  test('a branch counts its whole line, not only what the window saw', () => {
+    const a = on('a', trunkBase, 4, 1)
+    const n = nodesOf(readHistory({ refs: refsOf(['main', trunkBase.sha], ['a', a[0].sha]), worktrees: [trunkTree(trunkBase.sha)], commits: a.slice(0, 1), shape: [...a, trunkBase].map(c => ({ ...c, files: [] })) }))
+    assert.equal(n.a.total, 4)
+    assert.equal(n.a.commits.length, 4)
+    assert.match(n.a.tech, /^a$/, 'folders come from commits with their files read')
+  })
+
+  test('merged branches take spare cards after open ones, and count only if shown', () => {
+    const open = Array.from({ length: 3 }, (_, i) => on(`o${i}`, trunkBase, 1, 3 + i))
+    const gone = Array.from({ length: 3 }, (_, i) => on(`g${i}`, trunkBase, 1, 1))
+    let tip = trunkBase
+    const merges = gone.map(g => (tip = merge(tip, g[0])))
+    const out = readHistory({
+      refs: refsOf(['main', tip.sha], ...open.map((l, i) => [`o${i}`, l[0].sha]), ...gone.map((l, i) => [`g${i}`, l[0].sha])),
+      worktrees: [trunkTree(tip.sha)], commits: [...merges, ...open.flat(), ...gone.flat(), trunkBase], maxStreams: 4,
+    })
+    assert.deepEqual(out.streams.filter(s => !s.trunk).map(s => s.name).slice(0, 3), ['o0', 'o1', 'o2'])
+    assert.deepEqual([out.counts.shown, out.counts.active], [4, 4])
+  })
+
   test('thousands of refs read fast', () => {
     const lots = Array.from({ length: 3000 }, (_, i) => branch(`s${i}`, 1, i % 100))
     const started = Date.now()
     const out = readHistory({ refs: [head('main', trunkBase.sha), ...lots.map((l, i) => head(`s${i}`, l[0].sha))], worktrees: [tree('/r', 'main', trunkBase.sha)], commits: [...lots.flat(), trunkBase] })
-    assert.equal(out.streams.length, 8)
+    assert.equal(out.streams.filter(s => !s.trunk).length, 8)
     assert.ok(Date.now() - started < 3000, `${Date.now() - started} ms`)
   })
 })
 
 describe('drawing cards from git', () => {
   const pageGraph = (M, open = []) => {
-    const source = ['compLive', 'isUnfolded', 'kids', 'graphTaskIsOpen', 'graphTaskDetails', 'cardCommits', 'cardLines', 'inferredNote', 'graphDetailHeight', 'graphNodeMetrics', 'boardLayout', 'nodeAgentChips', 'areaGraphNode', 'collapsedGraphNode'].map(fn).join('\n')
+    const source = ['compLive', 'isUnfolded', 'kids', 'graphTaskIsOpen', 'graphTaskDetails', 'cardCommits', 'inferredNote', 'graphDetailHeight', 'graphNodeMetrics', 'boardLayout', 'nodeStatusIcon', 'nodeAgents', 'nodeAgentChips', 'handoffLabel', 'collapsedGraphNode'].map(fn).join('\n')
     return new Function('M', 'openGraphDetails', 'closedGraphDetails', 'Date', 'esc', `
       const openGraphTasks = new Set(), closedGraphTasks = new Set(), fileMode = false, ns = id => '1:' + id, ago = () => '3s'
       const agentColor = () => '', agentIcon = () => '', agentGlyph = n => n[0]
-      const fitLine = (text, room) => text.length > room ? text.slice(0, room - 1) + '…' : text
+      ${page.match(/^const cardFoot=.*$/m)[0]}
+      const pct = (done, total) => total ? Math.round(done / total * 100) : 0, statusLabel = s => s
       ${source}
-      return { boardLayout, collapsedGraphNode, cardLines, inferredNote }`)(M, new Set(open.map(id => `1:${id}`)), new Set(), { now: () => NOW }, (s) => String(s).replace(/</g, '&lt;'))
+      return { boardLayout, collapsedGraphNode, inferredNote, cardFoot }`)(M, new Set(open.map(id => `1:${id}`)), new Set(), { now: () => NOW }, (s) => String(s).replace(/</g, '&lt;'))
   }
   const scanned = {
     mode: 'streams',
-    streams: ['one', 'two', 'three'].map((name, i) => ({ key: name, id: streamId(name), name, at: NOW - i * HOUR, commits: 2, recent: [{ s: `${name} latest`, at: NOW }, { s: `${name} before`, at: NOW - 1 }], worktree: i ? null : '/w', links: ['src'], sample: [] })),
-    areas: ['src', 'test'].map((p) => ({ path: p, commits: 4, branches: 2, recent: [{ s: 'x', at: NOW, on: 'one' }], sample: [] })),
+    streams: [
+      { key: 'main', id: streamId('main'), name: 'main', trunk: true, parent: null, at: NOW, commits: 9, landed: 9, recent: [{ s: 'on main', at: NOW, landed: true }], worktree: '/r', folders: ['src'], sample: [] },
+      ...['one', 'two', 'three'].map((name, i) => ({ key: name, id: streamId(name), name, at: NOW - i * HOUR, commits: 13, landed: i ? 0 : 3, parent: streamId(i === 2 ? 'two' : 'main'), recent: [{ s: `${name} latest`, at: NOW, landed: false }, { s: `${name} before`, at: NOW - 1, landed: !i }], worktree: i ? null : '/w', folders: ['src/one', 'test', 'docs'], sample: [] })),
+    ],
+    areas: [],
   }
   const board = (extra = {}) => ({ plan: boardNodes(scanned).map((p, i) => ({ ...p, touchedAt: null, recent: [], ...(i === 1 ? extra : {}) })), runs: [], derived: { mode: 'streams', days: 7, shown: 3, active: 9, worktrees: 20, quiet: 14, commits: 40 }, hasPlan: false })
 
@@ -291,47 +408,70 @@ describe('drawing cards from git', () => {
     }
   })
 
-  test('workstreams sit left of the areas they touched, with a connector each', () => {
+  test('branches flow left to right from the trunk, on the plan\'s spacing, with a plan\'s connectors', () => {
     const b = board()
     const L = boardLayout(b, ui(), NOW)
-    const stream = b.plan.find(p => p.stream), area = b.plan.find(p => p.path === 'src')
-    assert.ok(L.pos[stream.id].x < L.pos[area.id].x)
+    const [main, one, two, three] = b.plan
+    assert.deepEqual([main.title, one.title, two.title, three.title], ['main', 'one', 'two', 'three'])
+    assert.ok(L.pos[main.id].x < L.pos[one.id].x && L.pos[two.id].x < L.pos[three.id].x)
+    assert.equal(L.pos[one.id].x - L.pos[main.id].x, 400 + 120)
+    assert.equal(L.pos[two.id].y - L.pos[one.id].y, 128 + 48)
     const { edges, trails } = boardEdges(b, L, NOW)
     assert.equal(edges.length, 3)
-    assert.ok(edges.every(e => e.kind === 'link'))
+    assert.ok(edges.every(e => e.kind === 'need' && e.arrow))
     assert.deepEqual(trails, [])
   })
 
-  test('a card shows its subjects as written, and no tasks or progress', () => {
+  test('a session moving between workstreams still leaves its trail', () => {
     const b = board()
-    const node = pageGraph(b).collapsedGraphNode(b.plan[0], 0, boardLayout(b, ui(), NOW).pos[b.plan[0].id])
-    assert.match(node, /one latest/)
-    assert.match(node, /one before/)
-    assert.doesNotMatch(node, /tasks|Not started|class="progress/)
+    const [, one, two] = b.plan
+    b.runs = [{ agent: 'claude', ended: false, componentId: two.id, path: [{ c: one.id, at: NOW - 1000 }, { c: two.id, at: NOW }] }]
+    const { trails } = boardEdges(b, boardLayout(b, ui(), NOW), NOW)
+    assert.equal(trails.length, 1)
   })
 
-  test('a subject cannot reach the page as markup', () => {
+  test('a stacked branch sits under what it grew from, so its connector does not cross', () => {
+    const list = ['a', 'b', 'c', 'd'].map((name) => ({ key: name, id: streamId(name), name, at: NOW, commits: 1, landed: 0, recent: [], folders: [], sample: [], parent: name === 'd' ? streamId('a') : name === 'c' ? streamId('b') : null }))
+    assert.deepEqual(boardNodes({ mode: 'streams', streams: list, areas: [] }).map(p => p.title), ['a', 'd', 'b', 'c'])
+  })
+
+  test('a card is the plan\'s card: top line, title, ring, count, bar and show line', () => {
     const b = board()
-    b.plan[0].commits = [{ s: '<img src=x onerror=alert(1)>', at: NOW }]
+    const p = b.plan[1]
+    const node = pageGraph(b).collapsedGraphNode(p, 0, boardLayout(b, ui(), NOW).pos[p.id])
+    assert.match(node, /class="kicker"[^>]*>src\/one, test, docs</)
+    assert.match(node, /class="node-title"[^>]*>one</)
+    assert.match(node, /3 of 13 commits landed · Underway/)
+    assert.match(node, /class="progress-bg"/)
+    const width = Number(node.match(/class="progress" x="16" y="92" width="([\d.]+)"/)[1])
+    assert.equal(width, (400 - 32) * 23 / 100) // pct rounds, as it does for tasks
+    assert.match(node, /SHOW COMMITS ↓/)
+    assert.match(node, /obs-file/)
+    assert.match(node, /3s ago/)
+    assert.doesNotMatch(node, /tasks|Not started/)
+  })
+
+  test('nothing landed draws an empty bar', () => {
+    const b = board()
+    const p = b.plan[2]
+    const node = pageGraph(b).collapsedGraphNode(p, 0, boardLayout(b, ui(), NOW).pos[p.id])
+    assert.match(node, /0 of 13 commits landed · Open/)
+    assert.match(node, /class="progress" x="16" y="92" width="0"/)
+  })
+
+  test('a name cannot reach the page as markup', () => {
+    const b = board()
+    b.plan[0].title = '<img src=x onerror=alert(1)>'
+    b.plan[0].tech = '<img src=y>'
+    b.plan[0].meta = '<img src=z>'
+    b.plan[0].flag = '<img src=w>'
     assert.doesNotMatch(pageGraph(b).collapsedGraphNode(b.plan[0], 0, boardLayout(b, ui(), NOW).pos[b.plan[0].id]), /<img/)
-  })
-
-  test('a session on a card takes the second line, live or just finished', () => {
-    const b = board()
-    const p = b.plan[0]
-    const ago = () => '5 min'
-    b.runs = [{ agent: 'claude', componentId: p.id, ended: false, lastEventAt: NOW, todos: [{ status: 'in_progress', content: 'Write the thing' }] }]
-    assert.deepEqual(cardLines(b, p, ago), { first: 'one latest', second: 'claude: Write the thing', working: true, age: '5 min ago' })
-    b.runs = [{ agent: 'codex', componentId: p.id, ended: true, lastEventAt: NOW }]
-    assert.equal(cardLines(b, p, ago).second, 'codex session, 5 min ago')
-    assert.equal(cardLines(b, p, ago).working, false)
   })
 
   test('the page and the mod word a card and the note the same', () => {
     const ago = () => '5 min'
     const b = board()
-    const long = { ...b.plan[0], commits: [{ s: 'x'.repeat(90), at: 1 }, { s: 'y'.repeat(90), at: 1 }] }
-    for (const p of [b.plan[0], { commits: [] }, long]) assert.deepEqual(cardLines(b, p, ago), pageGraph(b).cardLines(b, p, ago))
+    for (const p of [b.plan[0], { flag: '2 uncommitted', at: 1 }, { flag: 'remote · 1 uncommitted' }, {}]) assert.equal(cardFoot(p, ago), pageGraph(b).cardFoot(p, ago))
     for (const d of [b.derived, { mode: 'areas', days: null, commits: 1 }]) for (const narrow of [true, false]) assert.equal(inferredNote({ derived: d }, narrow), pageGraph(b).inferredNote({ derived: d }, narrow))
   })
 
@@ -352,7 +492,8 @@ describe('drawing cards from git', () => {
   test('a narrow view with nothing live opens on the newest card, not a fit too small to read', () => {
     const b = board()
     assert.equal(liveCard(b, NOW), null)
-    assert.equal(openingCard(b, NOW), b.plan[0].id)
+    assert.equal(b.plan[0].title, 'main')
+    assert.equal(openingCard(b, NOW), b.plan[1].id, 'a branch, not the trunk')
     assert.equal(openingCard({ plan: [{ id: 'x', level: 'component' }], runs: [] }, NOW), null, 'a plan keeps its fit')
   })
 })
@@ -401,18 +542,23 @@ describe('a real Map with no plan', () => {
     assert.equal(b.derived.days, null, 'a repo this quiet shows all it has')
     const search = card(b, 'feat/search')
     assert.deepEqual(search.commits.map(c => c.s), ['Rank search results', 'Add search box'])
-    assert.match(search.tech, /2 commits · worktree/)
+    assert.equal(search.meta, '0 of 2 commits landed · Open')
+    assert.equal(search.total, 2)
     assert.ok(card(b, 'fix/login'))
     assert.ok(!card(b, 'idea/empty'), 'a branch with nothing of its own is not work')
-    assert.ok(search.links.length > 0)
-    assert.ok(b.plan.every(n => n.derived && !n.needs.length && n.commits))
+    assert.match(search.tech, /web/)
+    assert.ok(b.plan.every(n => n.derived && !n.links.length && n.commits))
+    const root = b.plan.find(n => !n.needs.length)
+    assert.equal(root.title, 'main')
+    assert.ok(b.plan.filter(n => n !== root).every(n => n.needs[0] === root.id), 'each grew from the trunk')
+    assert.ok(!b.plan.some(n => n.path != null), 'no folder cards beside workstreams')
   })
 
   test('uncommitted work in a worktree is counted', async () => {
     const w = busy()
     put(w.away, { 'web/wip.js': 'x' })
     const b = await cardsOf(await start(w))
-    assert.match(card(b, 'feat/search').tech, /1 uncommitted/)
+    assert.equal(card(b, 'feat/search').flag, '1 uncommitted')
   })
 
   test('Map runs only read-only git commands, leaves the repo as it was, and adds nothing', async () => {
@@ -469,7 +615,6 @@ describe('a real Map with no plan', () => {
     assert.ok(!m.runs.some(r => r.id === 'elsewhere'))
     assert.equal(card(m, 'feat/search').touchedAt > 0, true)
     assert.equal(card(m, 'feat/search').recent[0].file, 'web/search.js')
-    assert.equal(m.plan.find(n => n.path === 'web')?.recent[0].file, 'web/search.js')
     assert.deepEqual(boardEdges(m, boardLayout(m, ui(), Date.now()), Date.now()).trails, [])
   })
 
@@ -492,8 +637,20 @@ describe('a real Map with no plan', () => {
     await cardsOf(map)
     await hook(map, 's1', quiet, path.join(quiet, 'src/a.js'), 'PreToolUse')
     const m = await until(async () => { const x = await lite(map); return card(x, 'chore/quiet') ? x : null }, 'the card', 10000)
-    assert.match(card(m, 'chore/quiet').tech, /no new commits/)
+    assert.equal(card(m, 'chore/quiet').meta, 'No new commits')
     assert.equal(card(m, 'chore/quiet').commits[0].s, 'start')
+  })
+
+  test('a session moving between workstreams leaves a trail between their cards', async () => {
+    const w = busy()
+    const map = await start(w)
+    await cardsOf(map)
+    const login = path.join(w.repo, '.wt', 'login')
+    await hook(map, 's1', w.away, path.join(w.away, 'web/search.js'))
+    await hook(map, 's1', login, path.join(login, 'api/login.js'))
+    const m = await lite(map)
+    assert.deepEqual(m.runs.find(r => r.id === 's1').path.map(x => x.c), [card(m, 'feat/search').id, card(m, 'fix/login').id])
+    assert.equal(boardEdges(m, boardLayout(m, ui(), Date.now()), Date.now()).trails.length, 1)
   })
 
   test('a session in a folder holding worktrees lands on the one it writes in', async () => {
@@ -513,7 +670,8 @@ describe('a real Map with no plan', () => {
     save(w.repo, 'Add the importer', { 'lib/import.js': 'x' })
     const b = await cardsOf(await start(w))
     assert.equal(b.derived.mode, 'areas')
-    assert.ok(b.plan.every(n => !n.stream && n.commits.length))
+    assert.ok(b.plan.every(n => !n.stream && n.commits.length && !n.needs.length))
+    assert.match(b.plan.find(n => n.path === 'lib').meta, /^1 of \d+ commits here$/)
     assert.ok(b.plan.some(n => n.path === 'lib' && n.commits[0].s === 'Add the importer'))
   })
 
@@ -559,7 +717,7 @@ describe('a real Map with no plan', () => {
     const b = await cardsOf(map)
     await map.stop()
     const c = await cardsOf(await start(w))
-    assert.deepEqual(c.plan.map(n => [n.id, n.col]), b.plan.map(n => [n.id, n.col]))
+    assert.deepEqual(c.plan.map(n => [n.id, n.needs]), b.plan.map(n => [n.id, n.needs]))
   })
 
   test('a plan takes over at once, and removing it brings the cards back', async () => {

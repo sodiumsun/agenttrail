@@ -26,17 +26,9 @@ export function taskDetails(b, task, ago) {
   return { rows, live };
 }
 
-// What a card drawn from git says. Subjects are shown as written, and it has no tasks to
-// count. A session working here takes the second line: it is the newest thing to know.
-const fitLine = (text, room) => (text.length > room ? `${text.slice(0, room - 1)}…` : text);
+// A card from git: its newest commits, and in the corner what git adds and how old it is.
 export const cardCommits = (p) => (p.commits ?? []).slice(0, 6);
-export function cardLines(b, p, ago) {
-  const [a, c] = p.commits ?? [];
-  const r = (b.runs ?? []).filter((x) => x.componentId === p.id).sort((x, y) => Number(x.ended) - Number(y.ended) || y.lastEventAt - x.lastEventAt)[0];
-  const doing = (r?.todos ?? []).find((t) => t.status === "in_progress")?.content ?? r?.currentTool?.detail ?? "working";
-  const session = !r ? "" : r.ended ? `${r.agent} session, ${ago(r.lastEventAt)} ago` : `${r.agent}: ${doing}`;
-  return { first: fitLine(a?.s ?? "No commits in this window", 60), second: fitLine(session || c?.s || "", 62), working: Boolean(r && !r.ended), age: p.at ? `${ago(p.at)} ago` : "" };
-}
+export const cardFoot = (p, ago) => [p.flag, p.at ? `${ago(p.at)} ago` : ""].filter(Boolean).join(" · ");
 
 // Map's honesty rule, with the count of what did not make it onto a card.
 export function inferredNote(b, narrow) {
@@ -76,7 +68,7 @@ export function boardLayout(b, ui, now) {
     if (depth[p.id] != null) return depth[p.id];
     if (visiting.has(p.id)) return 0;
     visiting.add(p.id);
-    if (p.col != null) return (depth[p.id] = p.col); // an inferred card has a place on a grid, and no edges to rank it
+    if (p.col != null) return (depth[p.id] = p.col); // a folder has a place on a grid, and no edges to rank it
     const preds = p.needs.filter((id) => byId[id]);
     depth[p.id] = preds.length ? 1 + Math.max(...preds.map((id) => getDepth(byId[id]))) : 0;
     visiting.delete(p.id);
@@ -85,8 +77,7 @@ export function boardLayout(b, ui, now) {
   phases.forEach(getDepth);
   const cols = {};
   phases.forEach((p) => (cols[depth[p.id]] ??= []).push(p));
-  // Connectors from a git board need room to be followed, and it has more rows than a plan.
-  const gx = b.derived ? 280 : 120, gy = b.derived ? 24 : 48, pad = 64;
+  const gx = 120, gy = 48, pad = 64;
   const metrics = Object.fromEntries(phases.map((p) => [p.id, nodeMetrics(b, p, ui, now)]));
   const columnWidths = {};
   for (const [col, list] of Object.entries(cols)) columnWidths[col] = Math.max(...list.map((p) => metrics[p.id].w));
@@ -190,8 +181,14 @@ export function liveCard(b, now) {
   return (newest(pinned) ?? newest(comps.filter((p) => touched(p, now))) ?? comps.find((p) => p.status === "active"))?.id ?? null;
 }
 
-// Where a narrow view opens with nothing live: a graph of git history always has a newest card.
-export const openingCard = (b, now) => liveCard(b, now) ?? (b.derived ? b.plan.find((n) => n.level === "component")?.id ?? null : null);
+// Where a narrow view opens with nothing live: a graph of git history always has a newest
+// card, and a branch is what it is about, so the trunk comes last.
+export const openingCard = (b, now) => {
+  const found = liveCard(b, now);
+  if (found || !b.derived) return found;
+  const cards = b.plan.filter((n) => n.level === "component");
+  return (cards.find((n) => n.needs.length) ?? cards[0])?.id ?? null;
+};
 
 const sameProps = (a, c) => JSON.stringify(a ?? {}) === JSON.stringify(c ?? {});
 

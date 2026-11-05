@@ -221,7 +221,8 @@ function rebuildMatchers() {
 }
 function touchCard(id, file, at) {
   compTouched[id] = Math.max(compTouched[id] || 0, at)
-  compRecent[id] = [{ file, at }, ...(compRecent[id] || []).filter(x => x.file !== file)].sort((a, b) => b.at - a.at).slice(0, 6)
+  const before = (compRecent[id] || []).find(x => x.file === file)
+  compRecent[id] = [{ file, at, n: (before?.n || 0) + 1 }, ...(compRecent[id] || []).filter(x => x.file !== file)].sort((a, b) => b.at - a.at).slice(0, 6)
 }
 function touchComponents(file, at) {
   for (const m of compMatchers) if (m.res.some(re => re.test(file))) {
@@ -537,7 +538,12 @@ const cardShown = id => parsed.nodes.some(n => n.id === id)
 function pinRun(run) {
   const spot = locate(run.place || run.cwd || '')
   const id = spot?.card
+  const was = run.componentId
   run.componentId = id && cardShown(id) ? id : run.areaCard && cardShown(run.areaCard) ? run.areaCard : null
+  if (was && run.componentId && run.componentId !== was) { // a session moved: its trail, as with a plan
+    const at = Date.now()
+    run.path = [...(run.path?.length ? run.path : [{ c: was, at }]), { c: run.componentId, at }].slice(-20)
+  }
   if (!run.ended && spot && gitScan?.mode === 'streams' && !run.componentId) scanSoon()
 }
 // Stepping back out of a worktree leaves a session where it last was.
@@ -575,6 +581,7 @@ function dropGit() {
   for (const key of Object.keys(compRecent)) if (ours(key)) delete compRecent[key]
   for (const r of Object.values(runs)) {
     if (ours(r.componentId)) r.componentId = null
+    if (r.path) r.path = r.path.filter(x => !ours(x.c))
     delete r.place
     delete r.areaCard
   }
