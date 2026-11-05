@@ -4,7 +4,7 @@ A [Herdr](https://herdr.dev) mod: Agenttrail Map, drawn natively beside your age
 
 ![Agenttrail for Herdr](agenttrail/preview.png)
 
-The picture is the real mod reading a real Map on this repository's own `PLAN.md`.
+The picture is the real mod, expanded to a full tab, reading a real Map on a copy of this repository and its own `PLAN.md`. The agents in it are stand-ins: a script posted Claude Code style hook events to Map and made real edits in the copy, so the cards show live work without a real agent session.
 
 [`agenttrail/`](agenttrail/) is the shareable folder: `mods/agenttrail/`, the [`RECIPE.md`](agenttrail/RECIPE.md) another agent can build it from, and `preview.png`.
 
