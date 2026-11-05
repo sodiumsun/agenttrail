@@ -190,6 +190,7 @@ const session = { id: Math.random().toString(36).slice(2, 10), project: path.bas
 let planText = safeRead(planPath)
 let parsed = parsePlan(planText)
 const inferring = () => planText.length === 0 // no plan: the map is built from git history
+const SCAN_FORMAT = 1 // raise when a saved scan's shape changes: an older one is dropped, not read
 let gitScan = null // what git-scan.mjs last read, plus { print, scannedAt, splitAt }
 let activity = null // { file, at } — most recent non-plan repo write
 let recentActivity = [] // last N writes, newest first — feeds the live-view drill-down
@@ -440,7 +441,7 @@ function loadState() {
     Object.assign(compTouched, st.compTouched || {})
     Object.assign(compRecent, st.compRecent || {})
     Object.assign(fileHeat, st.fileHeat || {})
-    gitScan = st.gitScan || null
+    gitScan = st.gitScan?.format === SCAN_FORMAT ? st.gitScan : null
     codexCursors = st.codexCursors || {}
     claudeCursors = st.claudeCursors || {}
   } catch {}
@@ -612,7 +613,7 @@ async function scanGit() {
   if (!seen || seen.failed || seen.same || !inferring()) return
   if (seen.ignored) { areaIgnored = new Set(seen.ignored); ignoredAt = Date.now() }
   const now = Date.now()
-  gitScan = seen.mode ? { ...seen, ignored: undefined, scannedAt: now, splitAt: moved ? now : gitScan?.splitAt ?? now } : { git: Boolean(seen.git), print: seen.print ?? null, scannedAt: now }
+  gitScan = seen.mode ? { ...seen, format: SCAN_FORMAT, ignored: undefined, scannedAt: now, splitAt: moved ? now : gitScan?.splitAt ?? now } : { git: Boolean(seen.git), print: seen.print ?? null, scannedAt: now }
   useGit()
   stateDirty = true
   broadcast()

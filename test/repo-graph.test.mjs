@@ -819,3 +819,21 @@ describe('public repo safety', () => {
     assert.deepEqual(scan(ROOT), [])
   })
 })
+
+describe('saved state from an older build', () => {
+  test('a saved scan in an old shape is dropped, and Map still starts', async () => {
+    const world = tempWorld()
+    const base = await freePortBase()
+    const first = await startMap({ repo: world.repo, home: world.home, base })
+    await first.stop()
+    const dir = path.join(world.home, '.agenttrail')
+    const file = path.join(dir, fs.readdirSync(dir).find(f => f.endsWith('.json')))
+    const saved = JSON.parse(fs.readFileSync(file, 'utf8'))
+    saved.gitScan = { mode: 'streams', days: 7, streams: [{ id: 's1', key: 'a', name: 'a', commits: 1, landed: 0, recent: [] }], areas: [] }
+    fs.writeFileSync(file, JSON.stringify(saved))
+    const second = await startMap({ repo: world.repo, home: world.home, base })
+    assert.equal((await second.model()).plan.length, 0)
+    await second.stop()
+    world.cleanup()
+  })
+})
