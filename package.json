@@ -1,6 +1,6 @@
 {
   "name": "agenttrail",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Local observability for AI coding agents: a live project map from PLAN.md, file activity and local Claude Code and Codex logs, with optional Claude Code hooks.",
   "type": "module",
   "bin": {
