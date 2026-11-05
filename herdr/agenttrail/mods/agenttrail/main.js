@@ -6,7 +6,7 @@ import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { appHome, exec, focused, home, layout, nextCommand, panes, props, run, settings, setShared, shared, spaces } from "herdr";
 import * as fs from "fs/promises";
-import { Feed, POLL_MS, PORT_BASE, focusFolder, repoName } from "./feed.js";
+import { Feed, POLL_MS, PORT_BASE, focusFolder, repoName, validPort } from "./feed.js";
 import { REGION_HEAD, REGION_X, REGION_Y, ago, boardEdges, boardLayout, cardAgents, cardAge, cardCommits, cardLine, hostOf, inferredNote, kids, liveCard, openingCard, statusLabel, taskDetails, taskIsOpen, touched } from "./graph.js";
 
 const MOD = "agenttrail";
@@ -14,7 +14,7 @@ const ASSET = `mods/${MOD}`;
 const TAB = "Map"; // the expanded tab's name, how a docked copy finds it again
 const VIEW = `${MOD}.view`; // shared: the view handed between the panel and its tab
 const FOLDER = `${MOD}.folder`; // shared: the last terminal folder, for a copy that has focus itself
-const START_COMMAND = ["npx", "-y", "agenttrail@latest"];
+const START_COMMAND = ["npx", "-y", "agenttrail@0.4.0"]; // pinned to this release: a later npm publish never runs from a click. test/herdr-map checks it matches package.json
 const START_WAIT_MS = 60000; // a first npx download takes a while; past this, offer the button again
 const NARROW = 560; // below this the whole graph is unreadable, so open on one card
 const SIDE_DOCK = 1040; // below this a run dock at the top right would sit on a centred card
@@ -70,7 +70,7 @@ export default class AgenttrailMap extends View {
     this.stats = { renders: 0, totalMs: 0, maxMs: 0, moves: 0, wheels: 0, worstNarrow: 0, worstFull: 0 };
     this.command = p.command ?? START_COMMAND;
     this.starting = new Set();
-    this.feed = new Feed({ fetch: (url) => fetch(url), sleep: (ms) => this.sleep(ms), root: gitRoot, folder: () => this.here(), base: p.portBase ?? PORT_BASE, port: p.port ?? null, eager: () => this.starting.size > 0 });
+    this.feed = new Feed({ fetch: (url) => fetch(url), sleep: (ms) => this.sleep(ms), root: gitRoot, folder: () => this.here(), base: validPort(p.portBase) ? p.portBase : PORT_BASE, port: validPort(p.port) ? p.port : null, eager: () => this.starting.size > 0 });
     cx.spawn(async (cx) => {
       this.sleep = (ms) => cx.sleep(ms);
       for (;;) {

@@ -143,6 +143,35 @@ describe('the Map mod', () => {
     const roots = { '/w/alpha': '/w/alpha', '/w/alpha/src': '/w/alpha', '/w/beta': '/w/beta', '/w/gamma': '/w/gamma', '/w/alpha/inner': '/w/alpha/inner' }
     const feedOn = (world, at, over = {}) => new Feed({ fetch: world.fetch, sleep: never, base: BASE, root: async f => roots[f] ?? null, folder: () => at.folder, ...over })
 
+    test('a /panel reply cannot steer the next fetch: the scanned port is kept', async () => {
+      const world = machine([A])
+      const fetch = world.fetch
+      world.fetch = async (url) => {
+        const res = await fetch(url)
+        if (!url.endsWith('/panel')) return res
+        const body = await res.json()
+        return { ok: true, json: async () => ({ ...body, port: '8080/elsewhere#' }) }
+      }
+      const feed = feedOn(world, { folder: '/w/alpha' })
+      await feed.tick()
+      assert.equal(feed.port, A.port)
+      assert.ok(world.asked.every(u => /^http:\/\/127\.0\.0\.1:\d+\/(panel|board-lite)$/.test(u)), world.asked.join(' '))
+    })
+
+    test('a board without a plan list is not shown, and bad ports are never fetched', async () => {
+      for (const plan of [null, 'x', [null]]) {
+        const feed = feedOn(machine([A], { plan }), { folder: '/w/alpha' })
+        await feed.tick()
+        assert.equal(feed.board, null, JSON.stringify(plan))
+      }
+      const world = machine([A])
+      for (const port of ['7000', 7000.5, 0, 70000, '8080/x#']) {
+        const feed = feedOn(world, { folder: '/w/alpha' }, { port })
+        assert.equal(await feed.get(port, '/board-lite'), null)
+      }
+      assert.deepEqual(world.asked, [])
+    })
+
     test('with no Map for this repo it shows nothing, and names the others', async () => {
       const feed = feedOn(machine([B]), { folder: '/w/alpha' })
       assert.equal(await feed.tick(), true)
@@ -378,7 +407,9 @@ describe('the Map mod', () => {
   test('the only command the mod sends that starts anything is the Map terminal', () => {
     const text = fs.readFileSync(path.join(ROOT, 'herdr', 'agenttrail', 'mods', 'agenttrail', 'main.js'), 'utf8')
     assert.deepEqual([...new Set(text.match(/\brun\("[a-z.]+"/g))].sort(), ['run("pane.zoom"', 'run("tab.close"', 'run("tab.new"', 'run("tab.select"', 'run("terminal.open"'])
-    assert.match(text, /START_COMMAND = \["npx", "-y", "agenttrail@latest"\]/)
+    // pinned to this release, so a new npm publish never runs from a click without a new mod release
+    const { version } = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
+    assert.ok(text.includes(`START_COMMAND = ["npx", "-y", "agenttrail@${version}"]`), `START_COMMAND must pin agenttrail@${version}`)
     assert.match(text, /\[\.\.\.this\.command, repo, "--no-open"\]/)
   })
 })

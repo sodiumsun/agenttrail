@@ -9,6 +9,7 @@ export const SCAN_MS = 15000; // while no Map matches: a scan is 15 fetches, and
 const TIMEOUT_MS = 4000; // Herdr's fetch is nearly serial and has no timeout of its own
 const MISSES_TO_DROP = 2; // one slow answer is not a stopped Map
 
+export const validPort = (p) => Number.isInteger(p) && p > 0 && p < 65536;
 export const norm = (p) => String(p ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
 const inside = (p, root) => p === root || p.startsWith(`${root}/`);
 export const repoName = (p) => norm(p).split("/").pop() || String(p ?? "");
@@ -32,7 +33,8 @@ export function pickMap(maps, folder, root) {
 
 async function getJson(fetch, url) {
   const res = await fetch(url);
-  return res.ok ? res.json() : null;
+  const body = res.ok ? await res.json() : null;
+  return body && typeof body === "object" ? body : null;
 }
 
 // state.kind: scanning, first look | map, board is set | off, no Map for this repo
@@ -61,6 +63,7 @@ export class Feed {
 
   // One fetch per url at a time: one that never answers must not pile more up behind it.
   get(port, path) {
+    if (!validPort(port)) return Promise.resolve(null);
     const url = `http://127.0.0.1:${port}${path}`;
     if (this.open.has(url)) return Promise.resolve(null);
     this.open.add(url);
@@ -70,10 +73,16 @@ export class Feed {
   async scan() {
     const ports = Array.from({ length: PORT_COUNT }, (_, i) => this.base + i);
     const seen = await Promise.all(ports.map((port) => this.get(port, "/panel")));
-    this.maps = seen.filter((m) => m?.app === "agenttrail" && m.repoPath)
+    // the port is the one scanned, never the one a server reports: a reply can't steer the next fetch
+    this.maps = seen.map((m, i) => m && { ...m, port: ports[i] }).filter((m) => m?.app === "agenttrail" && typeof m.repoPath === "string")
       .map(({ port, project, repoPath }) => ({ port, project, repoPath }))
       .sort((a, b) => String(a.project).localeCompare(String(b.project)) || a.port - b.port);
     this.scannedAt = this.now();
+  }
+
+  async readBoard(port) {
+    const b = await this.get(port, "/board-lite");
+    return b && Array.isArray(b.plan) && b.plan.every((n) => n && typeof n === "object") ? b : null;
   }
 
   async rootOf(folder) {
@@ -98,7 +107,7 @@ export class Feed {
       await this.scan();
       port = this.wanted(folder, root);
     }
-    let board = port ? await this.get(port, "/board-lite") : null;
+    let board = port ? await this.readBoard(port) : null;
     if (port && !board) {
       this.misses += 1;
       if (!moved && port === this.port && this.misses < MISSES_TO_DROP) return false;
@@ -107,7 +116,7 @@ export class Feed {
       if (!this.fixed) {
         await this.scan();
         port = this.wanted(folder, root);
-        board = port ? await this.get(port, "/board-lite") : null;
+        board = port ? await this.readBoard(port) : null;
       }
     } else this.misses = 0;
     const kind = board ? "map" : this.fixed ? "gone" : !folder ? "none" : root ? "off" : "plain";
