@@ -14,7 +14,7 @@ const ASSET = `mods/${MOD}`;
 const TAB = "Map"; // the expanded tab's name, how a docked copy finds it again
 const VIEW = `${MOD}.view`; // shared: the view handed between the panel and its tab
 const FOLDER = `${MOD}.folder`; // shared: the last terminal folder, for a copy that has focus itself
-const START_COMMAND = ["npx", "-y", "agenttrail@latest"];
+const START_COMMAND = ["npx", "-y", "agenttrail@0.4.1"]; // this release: updating the mod updates the Map it starts
 const START_WAIT_MS = 60000; // a first npx download takes a while; past this, offer the button again
 const NARROW = 560; // below this the whole graph is unreadable, so open on one card
 const SIDE_DOCK = 1040; // below this a run dock at the top right would sit on a centred card
@@ -35,6 +35,7 @@ const AGENT = { claude: "#d97757", cursor: "#5b7fd6", human: "#8b8b93", k: "#8b8
 const MARK = { claude: "claude", codex: "codex", chatgpt: "codex", openai: "codex" };
 const SOURCE = { hook: "hooks", "claude-log": "local log", "codex-log": "local log", "hook+claude-log": "hooks + log" };
 
+const own = (table, key) => (Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined); // a name from Map is never a built-in key
 const lit = () => settings()?.dark === false;
 const shortPath = (p) => { const h = home(); return h && p?.startsWith(`${h}/`) ? `~${p.slice(h.length)}` : p ?? ""; };
 const hasCards = (b) => Boolean(b?.plan.some((n) => n.level === "component"));
@@ -46,7 +47,7 @@ const gitRoot = async (cwd) => {
 const agentColor = (c, name) => {
   const k = String(name).toLowerCase();
   if (["codex", "chatgpt", "openai"].includes(k)) return c.openai;
-  return AGENT[k] ?? c.dim;
+  return own(AGENT, k) ?? c.dim;
 };
 
 export default class AgenttrailMap extends View {
@@ -68,7 +69,7 @@ export default class AgenttrailMap extends View {
     this.ui = { open: new Set(), closed: new Set(), openTasks: new Set(), closedTasks: new Set() };
     this.press = null;
     this.stats = { renders: 0, totalMs: 0, maxMs: 0, moves: 0, wheels: 0, worstNarrow: 0, worstFull: 0 };
-    this.command = p.command ?? START_COMMAND;
+    this.command = Array.isArray(p.command) && p.command.length && p.command.every((a) => typeof a === "string") ? p.command : START_COMMAND;
     this.starting = new Set();
     this.feed = new Feed({ fetch: (url) => fetch(url), sleep: (ms) => this.sleep(ms), root: gitRoot, folder: () => this.here(), base: p.portBase ?? PORT_BASE, port: p.port ?? null, eager: () => this.starting.size > 0 });
     cx.spawn(async (cx) => {
@@ -408,7 +409,7 @@ export default class AgenttrailMap extends View {
   }
 
   agentMark(c, name, x, y, size) {
-    const z = this.zoom, key = MARK[String(name).toLowerCase()];
+    const z = this.zoom, key = own(MARK, String(name).toLowerCase());
     const box = (el) => el.absolute().left((x - size / 2) * z).top((y - size / 2) * z).w(size * z).h(size * z);
     if (key) return box(svg(`${ASSET}/agent-${key}.svg`)).text_color(agentColor(c, name));
     return box(div()).flex().items_center().justify_center().text_size(11 * z).font_weight(700).font_family(SANS).text_color(agentColor(c, name)).child(String(name)[0].toUpperCase());
@@ -579,12 +580,12 @@ export default class AgenttrailMap extends View {
     const cur = (r.todos ?? []).find((t) => t.status === "in_progress");
     const tool = r.currentTool ?? r.recentTools?.[0];
     const comp = r.componentId ? b.plan.find((x) => x.id === r.componentId) : null;
-    const key = MARK[String(r.agent).toLowerCase()];
+    const key = own(MARK, String(r.agent).toLowerCase());
     return v_flex().px(14).py(12).rounded(14).border(1).border_color(c.line).bg(c.overlay).shadow_lg().flex_none()
       .child(h_flex().gap(8).items_center()
         .child(key ? svg(`${ASSET}/agent-${key}.svg`).w(16).h(16).flex_none().text_color(agentColor(c, r.agent)) : div().w(16).h(16).flex_none())
         .child(div().flex_none().text_size(13).font_weight(600).text_color(c.text).child(r.agent))
-        .when(!this.narrow(), (el) => el.child(div().flex_none().text_size(11.5).text_color(c.faint).child(`· ${SOURCE[r.source] ?? "hooks"} · ${b.project}`)))
+        .when(!this.narrow(), (el) => el.child(div().flex_none().text_size(11.5).text_color(c.faint).child(`· ${own(SOURCE, r.source) ?? "hooks"} · ${b.project}`)))
         .child(div().flex_none().w(6).h(6).rounded(6).bg(r.ended ? c.faint : c.success).when(!r.ended, (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1600 })))
         .child(h_flex().flex_1().min_w(0).justify_end().gap(4).text_size(11.5).text_color(c.faint)
           .child(div().flex_none().child(`${ago(r.startedAt, now)}${comp ? " · in" : ""}`))

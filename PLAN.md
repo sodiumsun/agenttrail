@@ -185,6 +185,9 @@ files: [bin/**, public/**, test/**, herdr/**, .github/workflows/map.yml]
 - [x] Replace the Herdr panel with the Map itself {#herdr-map-mod}
   by: claude
   tech: herdr/agenttrail/mods/agenttrail; pure feed.js, graph.js with test/herdr-map.test.mjs; RECIPE.md and preview.png rewritten for it
+- [x] Keep the Herdr mod to the ports it scanned, pin the Map it starts and survive a malformed board {#herdr-mod-hardening}
+  by: claude
+  tech: feed.js validPort, PATHS and cleanBoard; START_COMMAND pinned to the package version; test/herdr-map.test.mjs; issue 15
 - [ ] List the Map mod on herdr.dev once its Map is on npm {#herdr-list}
   from: agent
   tech: publish 0.4.0 first; then main-branch merge and the herdr-mod repo topic; owner's call
@@ -292,3 +295,4 @@ files: [README.md, docs/**, package.json, CONTRIBUTING.md, .github/**]
 - 2026-11-04: Codex reading is bounded to the last 2 MiB per file (real logs reach 1 GB), limited to files touched in the last 2 hours (the same window a Map run lives), and its cursors are saved in the same state file as the runs so a restart cannot replay events twice. A run's evidence field says which of its facts are reported, observed, inferred or unknown
 - 2026-11-04: the Herdr panel is tasks under Watch live runs, not a new component. It passes three parts of the convention's test (it changes what the product does, a second task is plain in remote machines, it owns herdr/**) but fails the first: nothing depends on it yet and it is unpublished. Promote it to a card if work keeps clustering in herdr/**. The panel reads only GET /panel, a versioned feed, so it never depends on Map's internal run shape. A run links to a terminal by terminal id first, then by repo only when exactly one local agent and one live run match; otherwise the row stays unlinked
 - 2026-11-05: the native Map replaces the list panel in herdr/agenttrail, under the mod name agenttrail. One mod is simpler to list and install, and it shows what the panel only summarised. Map keeps GET /panel: the mod uses it to find Maps. The panel's row-to-terminal linking goes with it. Still tasks under Watch live runs, not a new component
+- 2026-11-05: the Herdr mod treats every Map reply as untrusted data. It fetches only 127.0.0.1, a whole port it scanned or was given in props, and /panel or /board-lite; a reply is rebuilt into the shapes the view draws, and one without a plan list is no board. Start Map here runs the agenttrail version the mod was released with, so updating the mod is what moves it

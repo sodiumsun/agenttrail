@@ -5,8 +5,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { Feed, SCAN_MS, focusFolder, pickMap } from '../herdr/agenttrail/mods/agenttrail/feed.js'
-import { boardEdges, boardLayout, cardAgents, dockedIn, hostOf, liveCard } from '../herdr/agenttrail/mods/agenttrail/graph.js'
+import { Feed, PORT_BASE, SCAN_MS, cleanBoard, focusFolder, pickMap } from '../herdr/agenttrail/mods/agenttrail/feed.js'
+import { boardEdges, boardLayout, cardAgents, detailHeight, dockedIn, hostOf, liveCard, openingCard } from '../herdr/agenttrail/mods/agenttrail/graph.js'
 import { freePortBase, startMap, stopAll, tempWorld } from './helpers.mjs'
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -378,7 +378,134 @@ describe('the Map mod', () => {
   test('the only command the mod sends that starts anything is the Map terminal', () => {
     const text = fs.readFileSync(path.join(ROOT, 'herdr', 'agenttrail', 'mods', 'agenttrail', 'main.js'), 'utf8')
     assert.deepEqual([...new Set(text.match(/\brun\("[a-z.]+"/g))].sort(), ['run("pane.zoom"', 'run("tab.close"', 'run("tab.new"', 'run("tab.select"', 'run("terminal.open"'])
-    assert.match(text, /START_COMMAND = \["npx", "-y", "agenttrail@latest"\]/)
+    // Pinned to this release: a press runs the Map this mod was tested with, never whatever npm has that day.
+    const { version } = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
+    assert.ok(text.includes(`START_COMMAND = ["npx", "-y", "agenttrail@${version}"]`), `Start Map here must run agenttrail@${version}, the version in package.json`)
     assert.match(text, /\[\.\.\.this\.command, repo, "--no-open"\]/)
+  })
+})
+
+describe('the Map mod trusts no reply', () => {
+  const never = () => new Promise(() => {})
+  const URL = /^http:\/\/127\.0\.0\.1:(\d+)(\/panel|\/board-lite)$/
+  const board = { project: 'a', now: 1, plan: [{ id: 'core', level: 'component', title: 'Core', status: 'active', needs: [], links: [] }], runs: [] }
+  // Every port answers /panel with the given reply; the urls asked are kept.
+  const spoof = (panel, lite = board) => {
+    const asked = []
+    const fetch = async (url) => {
+      asked.push(url)
+      const body = url.endsWith('/panel') ? panel(Number(url.match(URL)?.[1])) : lite
+      return { ok: true, json: async () => body }
+    }
+    return { asked, fetch }
+  }
+  const feedOn = (fetch, over = {}) => new Feed({ fetch, sleep: never, base: 47100, root: async () => '/w/a', folder: () => '/w/a', ...over })
+
+  test('a /panel reply never chooses the port fetched next', async () => {
+    for (const port of ['8080/other#', 8080, '47101', -1, 1.5, null, { x: 1 }]) {
+      const { asked, fetch } = spoof((p) => (p === 47103 ? { app: 'agenttrail', port, project: 'a', repoPath: '/w/a' } : null))
+      const feed = feedOn(fetch)
+      await feed.tick()
+      await feed.tick()
+      assert.equal(feed.state.kind, 'map', String(port))
+      assert.equal(feed.port, 47103, String(port))
+      assert.deepEqual(feed.maps.map((m) => m.port), [47103])
+      for (const url of asked) {
+        const m = url.match(URL)
+        assert.ok(m, `${url} is not loopback and a known path`)
+        assert.ok(Number(m[1]) >= 47100 && Number(m[1]) < 47115, url)
+      }
+      assert.ok(asked.some((u) => u === 'http://127.0.0.1:47103/board-lite'))
+    }
+  })
+
+  test('only whole ports in range are ever fetched, from props or by hand', async () => {
+    const asked = []
+    const fetch = async (url) => { asked.push(url); return { ok: false } }
+    for (const port of ['8080/other#', '0', 0, 65536, 1.5, -5, '', [5330], { p: 1 }]) assert.equal(new Feed({ fetch, sleep: never, port }).fixed, null, String(port))
+    assert.equal(new Feed({ fetch, sleep: never, port: '47120' }).fixed, 47120)
+    for (const base of ['47100/x', 65530, 0, 2.5, 'abc']) assert.equal(new Feed({ fetch, sleep: never, base }).base, PORT_BASE, String(base))
+    assert.equal(new Feed({ fetch, sleep: never, base: 47100 }).base, 47100)
+    const feed = new Feed({ fetch, sleep: () => Promise.resolve(), base: 47100 })
+    for (const port of ['8080/x', 70000, 1.5, NaN, null]) assert.equal(await feed.get(port, '/panel'), null)
+    for (const path of ['/world', '/panel?x', '@evil/panel', '/../panel']) assert.equal(await feed.get(47100, path), null)
+    feed.choose('8080/other#')
+    assert.equal(feed.chosen, null)
+    assert.deepEqual(asked, [])
+  })
+
+  test('a reply that is not a board is no board', () => {
+    for (const raw of [null, undefined, 'x', 5, [], {}, { plan: null }, { plan: 'x' }, { plan: {} }, { plan: 5 }]) assert.equal(cleanBoard(raw), null, JSON.stringify(raw))
+  })
+
+  test('a malformed plan is cleaned into one the view can draw', () => {
+    const raw = {
+      project: { x: 1 }, now: 'soon', runs: 'x', activity: 'x', recentActivity: [null, { file: 5, n: 'x' }, { n: 2 }], derived: 'x',
+      plan: [null, 'x', 5, [], {}, { id: '' },
+        { id: 'a', level: 'component', title: 5, status: null, needs: null, links: 'b', recent: 'x', commits: {}, col: 'x', by: {} },
+        { id: 'b', level: 'component', needs: 'a', links: [null, 'a', 7, 'constructor'], recent: [{ file: null }, { file: 'x.js', n: '3', at: 'now' }] },
+        { id: 'c', level: 'component' },
+        { id: 'd', level: 'component', needs: ['a', '__proto__', { id: 'b' }], col: -1 },
+        { id: 't', level: 'task', parent: 'a', title: ['x'], status: 'active', by: 'claude' },
+        { id: 'constructor', level: 'component' }, { id: '__proto__', level: 'component' }, { id: 'toString', level: 'component' }, { id: 'a', level: 'component', title: 'dup' }],
+    }
+    const b = cleanBoard(raw)
+    assert.deepEqual(b.plan.map((n) => n.id), ['a', 'b', 'c', 'd', 't'])
+    const [a, bb, c, d, t] = b.plan
+    assert.deepEqual([a.title, a.status, a.needs, a.links, a.recent, a.commits, a.col, a.by], ['5', 'pending', [], [], [], [], null, null])
+    assert.deepEqual([bb.needs, bb.links, bb.recent], [[], ['a', '7'], [{ file: 'x.js', n: 0, at: 0 }]])
+    assert.deepEqual([c.needs, c.links, d.needs, d.col], [[], [], ['a'], null])
+    assert.equal(t.title, 't') // a title that isn't text falls back to the id
+    assert.deepEqual([b.project, b.now, b.runs, b.activity, b.recentActivity, b.derived], ['', 0, [], null, [{ file: '5', n: 0, at: 0 }], null])
+    const ui = { open: new Set(['a', 'b', 'c', 'd']), closed: new Set(), openTasks: new Set(['t']), closedTasks: new Set() }
+    const L = boardLayout(b, ui, 1000)
+    assert.deepEqual(Object.keys(L.pos).sort(), ['a', 'b', 'c', 'd'])
+    for (const p of Object.values(L.pos)) assert.ok([p.x, p.y, p.w, p.h].every(Number.isFinite))
+    const { edges } = boardEdges(b, L, 1000)
+    assert.equal(edges.length, 2) // d needs a, and the a-b link
+    assert.equal(liveCard(b, 1000), null)
+    assert.equal(openingCard(b, 1000), null)
+    assert.deepEqual(cardAgents(b, a), ['claude'])
+    for (const p of [a, bb, c, d]) assert.ok(Number.isFinite(detailHeight(b, p, ui, 1000)))
+  })
+
+  test('malformed runs are cleaned, and draw no trail through a missing card', () => {
+    const b = cleanBoard({
+      plan: [{ id: 'a', level: 'component', needs: [] }, { id: 'b', level: 'component', needs: ['a'] }],
+      runs: [null, 'x', { agent: { name: 'x' }, ended: 'yes', componentId: 'constructor', path: 'x', todos: { a: 1 }, currentTool: 'Edit', recentTools: [null, { name: 3 }] },
+        { agent: 'claude', componentId: 'b', startedAt: 'x', path: [{ c: 'a', at: 5 }, { c: 'valueOf', at: 6 }, null, { c: 'b', at: 7 }], todos: [null, { content: 7, status: 'in_progress' }] }],
+    })
+    const [x, r] = b.runs
+    assert.deepEqual([x.agent, x.ended, x.componentId, x.path, x.todos, x.currentTool, x.recentTools], ['agent', true, null, [], [], null, [{ name: '3', detail: '', at: 0 }]])
+    assert.deepEqual([r.startedAt, r.path.map((s) => s.c), r.todos], [0, ['a', 'b'], [{ content: '7', status: 'in_progress' }]])
+    const ui = { open: new Set(), closed: new Set(), openTasks: new Set(), closedTasks: new Set() }
+    const { trails } = boardEdges(b, boardLayout(b, ui, 10), 10)
+    assert.equal(trails.length, 1)
+    assert.ok(trails[0].points.flat().every(Number.isFinite))
+    assert.equal(liveCard(b, 10), 'b')
+  })
+
+  test('the layout itself survives a plan entry with no needs', () => {
+    const b = { plan: [{ id: 'a', level: 'component' }, { id: 'b', level: 'component', needs: ['a'] }], runs: [] }
+    const ui = { open: new Set(), closed: new Set(), openTasks: new Set(), closedTasks: new Set() }
+    const L = boardLayout(b, ui, 0)
+    assert.ok(L.pos.b.x > L.pos.a.x)
+    assert.equal(boardEdges(b, L, 0).edges.length, 1)
+    assert.equal(openingCard({ ...b, derived: {} }, 0), 'b')
+  })
+
+  test('a Map answering with no plan list leaves the view off, not broken', async () => {
+    for (const lite of [{}, { plan: null }, 'x', { plan: [{ id: 'a', level: 'component', needs: 'oops' }] }]) {
+      const { fetch } = spoof((p) => (p === 47100 ? { app: 'agenttrail', project: 'a', repoPath: '/w/a' } : null), lite)
+      const feed = feedOn(fetch)
+      await feed.tick()
+      if (typeof lite === 'object' && Array.isArray(lite.plan)) {
+        assert.equal(feed.state.kind, 'map')
+        assert.deepEqual(feed.board.plan[0].needs, [])
+      } else {
+        assert.equal(feed.board, null, JSON.stringify(lite))
+        assert.equal(feed.state.kind, 'off')
+      }
+    }
   })
 })

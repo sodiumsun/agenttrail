@@ -29,4 +29,4 @@ herdr-app do pane.split --direction right --mod agenttrail
 - Click a card to open its tasks. Drag or scroll to pan, and hold cmd or ctrl while scrolling to zoom.
 - The header button expands the panel to full size and collapses it again.
 
-The mod is read-only. It talks only to Map on `127.0.0.1`, ports 5330 to 5344, and the only thing it starts is a Map terminal, when asked. It reads this computer only.
+The mod is read-only. It talks only to Map on `127.0.0.1`, ports 5330 to 5344, and checks every reply before drawing it. The only thing it starts is a Map terminal, when asked, running the agenttrail version the mod was released with. It reads this computer only.

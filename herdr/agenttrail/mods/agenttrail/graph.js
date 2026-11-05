@@ -9,7 +9,7 @@ export const REGION_HEAD = 56;
 export const LIVE_MS = 60000;
 const TRAIL_MS = 45 * 60e3;
 
-export const kids = (b, id) => b.plan.filter((n) => n.parent === id);
+export const kids = (b, id) => (b.plan ?? []).filter((n) => n.parent === id);
 export const touched = (p, now) => Boolean(p.touchedAt && now - p.touchedAt < LIVE_MS);
 export const compLive = (b, p, now) => p.status === "active" || touched(p, now) || (b.runs ?? []).some((r) => !r.ended && r.componentId === p.id);
 // A card from git opens only when asked: a file write must not push the cards below it.
@@ -76,7 +76,7 @@ export function boardLayout(b, ui, now) {
     if (visiting.has(p.id)) return 0;
     visiting.add(p.id);
     if (p.col != null) return (depth[p.id] = p.col); // a folder has a place on a grid, and no edges to rank it
-    const preds = p.needs.filter((id) => byId[id]);
+    const preds = (p.needs ?? []).filter((id) => byId[id]);
     depth[p.id] = preds.length ? 1 + Math.max(...preds.map((id) => getDepth(byId[id]))) : 0;
     visiting.delete(p.id);
     return depth[p.id];
@@ -158,7 +158,7 @@ export function boardEdges(b, L, now) {
     return points.length > 1 ? [{ agent: r.agent, ended: Boolean(r.ended), points }] : [];
   });
   const edges = [
-    ...phases.flatMap((p) => p.needs.filter((n) => byId[n] && pos[n] && pos[p.id]).map((n) => needEdge(byId[n], p, pos, traveled[`${n}|${p.id}`]))),
+    ...phases.flatMap((p) => (p.needs ?? []).filter((n) => byId[n] && pos[n] && pos[p.id]).map((n) => needEdge(byId[n], p, pos, traveled[`${n}|${p.id}`]))),
     ...pairs.map(([a, c]) => linkEdge(a, c, pos, traveled[`${a.id}|${c.id}`] ?? traveled[`${c.id}|${a.id}`])),
   ];
   return { trails, edges };
@@ -194,7 +194,7 @@ export const openingCard = (b, now) => {
   const found = liveCard(b, now);
   if (found || !b.derived) return found;
   const cards = b.plan.filter((n) => n.level === "component");
-  return (cards.find((n) => n.needs.length) ?? cards[0])?.id ?? null;
+  return (cards.find((n) => (n.needs ?? []).length) ?? cards[0])?.id ?? null;
 };
 
 const sameProps = (a, c) => JSON.stringify(a ?? {}) === JSON.stringify(c ?? {});
