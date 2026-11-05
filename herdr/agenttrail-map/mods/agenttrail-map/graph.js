@@ -26,19 +26,26 @@ export function taskDetails(b, task, ago) {
   return { rows, live };
 }
 
-// A card from git: its newest commits, and in the corner what git adds and how old it is.
+// A card from git: its newest commits. The latest one takes a plan's task line, in what room
+// the corner leaves it: how old it is, or the file an agent is on. Sized by count, as the page
+// draws text it cannot measure ahead, so both cut a line at the same word.
 export const cardCommits = (p) => (p.commits ?? []).slice(0, 6);
-export const cardFoot = (p, ago) => [p.flag, p.at ? `${ago(p.at)} ago` : ""].filter(Boolean).join(" · ");
+export const cardAge = (p, ago) => (p.at ? `${ago(p.at)} ago` : "");
+export function cardLine(line, corner) {
+  const room = Math.floor((368 - (corner ? corner.length * 6.7 + 12 : 0)) / 6);
+  return line.length > room ? `${line.slice(0, room - 1).trimEnd()}…` : line;
+}
 
 // Map's honesty rule, with the count of what did not make it onto a card.
 export function inferredNote(b, narrow) {
   const d = b.derived ?? {};
   const span = d.days ? `last ${d.days} days` : "all history";
+  const bars = d.mode === "streams" ? ` Bars: commits ${d.days ? `in the ${span}` : "so far"}, against the busiest branch.` : "";
   const what = d.mode === "streams"
     ? `${d.shown} of ${d.active} active branches and worktrees shown, ${d.active - d.shown} left out`
     : `${d.commits} commit${d.commits === 1 ? "" : "s"} on one branch`;
   const quiet = d.mode === "streams" && d.quiet ? ` ${d.quiet} of ${d.worktrees} worktrees quiet.` : "";
-  return `Inferred from git, ${span}: ${what}.${narrow ? "" : `${quiet} A plan adds tasks and progress: npx agenttrail init`}`;
+  return `Inferred from git, ${span}: ${what}.${narrow ? "" : `${quiet}${bars} A plan adds tasks and progress: npx agenttrail init`}`;
 }
 
 export function detailHeight(b, p, ui, now) {

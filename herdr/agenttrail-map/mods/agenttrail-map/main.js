@@ -7,7 +7,7 @@ import { h_flex, v_flex } from "gpui-base";
 import { appHome, exec, focused, home, layout, nextCommand, panes, props, run, settings, setShared, shared, spaces } from "herdr";
 import * as fs from "fs/promises";
 import { Feed, POLL_MS, PORT_BASE, focusFolder, repoName } from "./feed.js";
-import { REGION_HEAD, REGION_X, REGION_Y, ago, boardEdges, boardLayout, cardAgents, cardCommits, cardFoot, hostOf, inferredNote, kids, liveCard, openingCard, statusLabel, taskDetails, taskIsOpen, touched } from "./graph.js";
+import { REGION_HEAD, REGION_X, REGION_Y, ago, boardEdges, boardLayout, cardAgents, cardAge, cardCommits, cardLine, hostOf, inferredNote, kids, liveCard, openingCard, statusLabel, taskDetails, taskIsOpen, touched } from "./graph.js";
 
 const MOD = "agenttrail-map";
 const ASSET = `mods/${MOD}`;
@@ -29,8 +29,8 @@ const RENDER_BUDGET_MS = 28;
 const UNFOLD_AT = 1.05, FOLD_AT = 0.85; // zooming in opens every card, as on the page
 
 // Map's own tokens (public/index.html :root), so the two read as one product.
-const DARK = { bg: "#000000", surface: "#181818", raised: "#1f1f1f", hover: "#272727", line: "#313131", text: "#ffffff", soft: "#d1d1d1", dim: "#9b9b9b", faint: "#686868", accent: "#e9a23b", danger: "#db6b67", success: "#7aa36a", done: "#3f7f57", completeText: "#70a784", completeBg: "#3f7f572e", region: "#18181880", overlay: "#181818", card: "#181818", cardHover: "#1f1f1f", human: "#5fb8c9", knowledge: "#a189e0", dot: "#31313159", openai: "#e8e8ea" };
-const LIGHT = { ...DARK, bg: "#ffffff", surface: "#f9f8f7", raised: "#f3f2f0", hover: "#eeecea", line: "#00000024", text: "#000000", soft: "#000000c7", dim: "#666666", faint: "#0000007a", accent: "#955f12", success: "#3f7f57", region: "#f9f8f780", overlay: "#ffffff", card: "#ffffff", cardHover: "#f9f8f7", dot: "#00000018", openai: "#111111" };
+const DARK = { bg: "#000000", surface: "#181818", raised: "#1f1f1f", hover: "#272727", line: "#313131", text: "#ffffff", soft: "#d1d1d1", dim: "#9b9b9b", faint: "#686868", accent: "#e9a23b", danger: "#db6b67", success: "#7aa36a", done: "#3f7f57", completeText: "#70a784", completeBg: "#3f7f572e", region: "#18181880", overlay: "#181818", card: "#181818", cardLive: "#2f271c", cardHover: "#1f1f1f", human: "#5fb8c9", knowledge: "#a189e0", dot: "#31313159", openai: "#e8e8ea" };
+const LIGHT = { ...DARK, bg: "#ffffff", surface: "#f9f8f7", raised: "#f3f2f0", hover: "#eeecea", line: "#00000024", text: "#000000", soft: "#000000c7", dim: "#666666", faint: "#0000007a", accent: "#955f12", success: "#3f7f57", region: "#f9f8f780", overlay: "#ffffff", card: "#ffffff", cardLive: "#fdf5e9", cardHover: "#f9f8f7", dot: "#00000018", openai: "#111111" };
 const AGENT = { claude: "#d97757", cursor: "#5b7fd6", human: "#8b8b93", k: "#8b8b93" };
 const MARK = { claude: "claude", codex: "codex", chatgpt: "codex", openai: "codex" };
 const SOURCE = { hook: "hooks", "claude-log": "local log", "codex-log": "local log", "hook+claude-log": "hooks + log" };
@@ -436,24 +436,26 @@ export default class AgenttrailMap extends View {
     const z = this.zoom, w = pos.nodeW, h = pos.nodeH;
     const list = kids(b, p.id);
     const done = p.derived ? p.landed : list.filter((n) => n.status === "done").length;
-    const total = p.derived ? p.total : list.length; // a card from git counts commits, the rest of it is a plan's
+    const [filled, total] = p.derived ? [p.bar?.n ?? 0, p.bar?.of ?? 0] : [done, list.length]; // a plan counts tasks, and git measures something else
     const unit = p.derived ? "COMMITS" : "TASKS";
-    const foot = p.derived ? cardFoot(p, (at) => ago(at, now)) : "";
+    const foot = p.derived ? p.foot : "";
     const open = pos.h > h;
     const live = touched(p, now);
     const tint = p.kind === "knowledge" ? c.knowledge : p.kind === "human" ? c.human : c.accent;
-    const edge = p.kind === "knowledge" ? c.knowledge : p.kind === "human" ? c.human : p.status === "blocked" ? c.danger : open || p.status === "active" ? c.accent : c.line;
+    const edge = p.kind === "knowledge" ? c.knowledge : p.kind === "human" ? c.human : p.status === "blocked" ? c.danger : open || live || p.status === "active" ? c.accent : c.line;
     const strong = edge !== c.line;
     const word = p.status === "done" ? "Revising" : p.status === "blocked" ? "Retrying" : "Editing";
     const names = cardAgents(b, p);
     const label = p.title.length > 28 ? `${p.title.slice(0, 27)}…` : p.title;
     const recent = (p.recent ?? [])[0];
+    const chip = live && recent ? `${recent.file.split("/").pop()}${recent.n > 1 ? ` ×${recent.n}` : ""} · ${ago(recent.at, now)}` : "";
+    const age = p.derived && !chip ? cardAge(p, (at) => ago(at, now)) : "";
     const barW = (w - 32) * z;
     const hasPlan = list.some((k) => k.status === "pending" && k.src === "agent");
     const ports = [0, w].map((x) => div().absolute().left((x - 4) * z).top((h / 2 - 4) * z).w(8 * z).h(8 * z).rounded(8 * z).bg(c.raised).border(1).border_color(c.faint));
     return div().id(`n-${p.id}`).absolute()
       .left(this.pan.x + (REGION_X + pos.nodeX) * z).top(this.pan.y + (REGION_Y + REGION_HEAD + pos.nodeY) * z).w(w * z).h(h * z)
-      .rounded(12 * z).bg(c.card).border(strong ? 1.5 : 1).border_color(edge).cursor_pointer()
+      .rounded(12 * z).bg(live && !p.kind ? c.cardLive : c.card).border(strong ? 1.5 : 1).border_color(edge).cursor_pointer()
       .when(p.kind === "human", (el) => el.border_dashed())
       .hover((s) => s.bg(c.cardHover).border_color(strong ? edge : c.faint))
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
@@ -463,12 +465,14 @@ export default class AgenttrailMap extends View {
       .when(live, (el) => el
         .child(svg(`${ASSET}/arc-live.svg`).absolute().left((w - 41) * z).top(11 * z).w(30 * z).h(30 * z).text_color(tint).spin(1300))
         .child(this.text(word, { right: 44 + 24 * Math.min(names.length, 3), y: 30, size: 11, color: tint, weight: 600 }))
-        .when(Boolean(recent), (e2) => e2.child(this.text(`${recent.file.split("/").pop()}${recent.n > 1 ? ` ×${recent.n}` : ""} · ${ago(recent.at, now)}`, { right: 16, y: 76, size: 11, color: tint, mono: true }))))
+        .when(Boolean(chip), (e2) => e2.child(this.text(chip, { right: 16, y: 76, size: 11, color: tint, mono: true }))))
+      .when(Boolean(age), (el) => el.child(this.text(age, { right: 16, y: 76, size: 11, color: c.faint, mono: true })))
       .children(names.map((n, i) => this.agentMark(c, n, w - 26 - 24 * (i + 1), 26, 13)))
       .child(this.text(label, { x: 16, y: 52, size: 15, color: c.text, weight: 600 }))
-      .child(this.text(p.meta ?? `${done} of ${list.length} tasks · ${p.status === "pending" && done > 0 ? "Underway" : statusLabel(p.status)}`, { x: 16, y: 76, size: 12, color: c.dim }))
-      .child(div().absolute().left(16 * z).top(92 * z).w(barW).h(4 * z).rounded(2 * z).bg(c.hover))
-      .child(div().absolute().left(16 * z).top(92 * z).w(total ? barW * done / total : 0).h(4 * z).rounded(2 * z).bg(p.status === "active" ? c.accent : c.soft))
+      .child(this.text(p.derived ? cardLine(p.meta, chip || age) : `${done} of ${list.length} tasks · ${p.status === "pending" && done > 0 ? "Underway" : statusLabel(p.status)}`, { x: 16, y: 76, size: 12, color: c.dim }))
+      .when(!p.derived || Boolean(p.bar), (el) => el
+        .child(div().absolute().left(16 * z).top(92 * z).w(barW).h(4 * z).rounded(2 * z).bg(c.hover))
+        .child(div().absolute().left(16 * z).top(92 * z).w(total ? barW * filled / total : 0).h(4 * z).rounded(2 * z).bg(p.status === "active" ? c.accent : c.soft)))
       .child(this.text(open ? `HIDE ${unit} ↑` : `SHOW ${unit} ↓`, { x: 16, y: 116, size: 11, color: open ? c.accent : c.faint, mono: true, weight: 500 }))
       .when(Boolean(foot), (el) => el.child(this.text(foot, { right: 16, y: 116, size: 11, color: c.faint, mono: true })))
       .when(hasPlan, (el) => el.child(this.text("SESSION PLAN", { right: 16, y: 116, size: 10, color: "#e08bb8", mono: true, weight: 700 })))

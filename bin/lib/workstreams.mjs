@@ -16,6 +16,7 @@ const STREAM_AREAS = 8 // folders a workstream can name; a repo with one branch 
 const SHOWN_COMMITS = 6
 const MAX_FILES = 300 // of one commit: past this it is a bulk move, and more names add nothing
 const TOP_LINE = 33 // what a card's top line holds beside its status, in the page and the mod
+const FOOT_LINE = 40 // what its bottom line holds beside SHOW COMMITS
 const TRUNKS = ['main', 'master', 'trunk'] // beside origin/HEAD, which can be years stale
 
 export const streamId = (key) => `ws-${crypto.createHash('sha1').update(key).digest('hex').slice(0, 10)}`
@@ -186,6 +187,7 @@ export function readHistory({ refs, worktrees, commits, shape = null, originHead
   const trunkShas = refs.filter((r) => trunks.has(branchName(r.ref))).map((r) => r.sha)
   const { landed, landedWork, owner } = assignCommits(byHash, tips.values(), trunkShas)
   const hasLanded = (c) => landed.has(c.sha) || landedWork.has(sameWork(c))
+  const inRange = new Set(commits.map((c) => c.sha))
   const real = commits.filter((c) => realCommit(c) && (c.files.length || !c.parents.length))
   const trunk = [...tips.values()].filter((t) => t.trunk).sort((a, b) => b.ct - a.ct)[0] ?? null
   const inWindow = new Set()
@@ -225,7 +227,7 @@ export function readHistory({ refs, worktrees, commits, shape = null, originHead
     return [...hits].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([p]) => p)
   }
   const stream = ({ tip, own, at, key, live: isLive, landed: done }, parent) => ({
-    key, id: streamId(key), name: tip.name, at, commits: own.length, landed: done, live: isLive, parent,
+    key, id: streamId(key), name: tip.name, at, commits: own.length, lately: own.filter((c) => inRange.has(c.sha)).length, landed: done, live: isLive, parent,
     recent: own.slice(0, SHOWN_COMMITS).map((c) => ({ s: c.s, at: c.ct, landed: c.landed })),
     worktree: tip.worktree, remote: !tip.local, detached: Boolean(tip.detached), trunk: tip.trunk, head: tip.sha,
     folders: touched(own), sample: [...new Set(own.flatMap((c) => c.files))].slice(0, 24),
@@ -256,20 +258,32 @@ export function readHistory({ refs, worktrees, commits, shape = null, originHead
 const card = (fields) => ({ level: 'component', parent: null, needs: [], links: [], files: [], by: '', kind: '', url: '', status: 'pending', derived: true, ...fields })
 const columnsFor = (n) => n < 2 ? 1 : Math.max(2, Math.min(4, Math.ceil(Math.sqrt(n / 2))))
 
-// A branch's word: nothing here says what done would be, so only git's answer counts.
-const streamMeta = (s) => {
-  if (s.trunk) return s.commits ? `${counted(s.commits, 'commit')} landed` : 'No new commits'
-  if (!s.commits) return 'No new commits'
-  const word = s.landed === s.commits ? 'Complete' : s.landed ? 'Underway' : 'Open'
-  return `${s.landed} of ${counted(s.commits, 'commit')} landed · ${word}`
+const span = (days) => days ? `in ${days} days` : 'in all'
+const activity = (n, days) => n ? `${counted(n, 'commit')} ${span(days)}` : `No commits ${span(days)}`
+
+// A card's bottom line says what its bar measures, then what else git knows, as far as it fits.
+function streamFoot(s, days, top, alone) {
+  const flag = [s.remote ? 'remote' : s.detached ? 'detached' : '', s.dirty ? `${s.dirty} uncommitted` : ''].filter(Boolean).join(' · ')
+  const line = (...parts) => parts.filter(Boolean).join(' · ')
+  const plain = activity(s.lately, days)
+  if (s.trunk) return [line(flag, s.lately ? `${plain}, all landed` : plain), line(flag, plain)].find((l) => l.length <= FOOT_LINE) ?? plain
+  const said = alone && s.lately === top ? `Busiest: ${plain}` : plain
+  const landing = s.landed ? `${s.landed} of ${s.commits} landed` : ''
+  return [line(flag, said, landing), line(flag, said), line(flag, plain)].find((l) => l.length <= FOOT_LINE) ?? plain
 }
-const streamCard = (s) => card({
-  id: s.id, title: s.name, sample: s.sample, stream: true, needs: s.parent ? [s.parent] : [],
-  tech: folderLine(s.folders) || (s.worktree ? 'worktree' : 'branch'),
-  meta: streamMeta(s), landed: s.landed, total: s.commits, status: s.commits && s.landed === s.commits ? 'done' : 'pending',
-  flag: [s.remote ? 'remote' : s.detached ? 'detached' : '', s.dirty ? `${s.dirty} uncommitted` : ''].filter(Boolean).join(' · '),
-  commits: s.recent.length ? s.recent : s.last ? [s.last] : [], at: s.at || s.last?.at || 0,
-})
+
+// Nothing here says what done would be, so a bar never claims progress. It is how many commits
+// a branch had in the window, against the busiest card. The trunk is not one of the race.
+const streamCard = (s, days, top, alone) => {
+  const latest = s.recent[0] ?? s.last
+  return card({
+    id: s.id, title: s.name, sample: s.sample, stream: true, needs: s.parent ? [s.parent] : [],
+    tech: folderLine(s.folders) || (s.worktree ? 'worktree' : 'branch'),
+    meta: latest?.s || 'No new commits', foot: streamFoot(s, days, top, alone), bar: s.trunk ? null : { n: s.lately, of: top },
+    landed: s.landed, total: s.commits, status: s.commits && s.landed === s.commits ? 'done' : 'pending',
+    commits: s.recent.length ? s.recent : s.last ? [s.last] : [], at: s.at || s.last?.at || 0,
+  })
+}
 
 // Parents before their children, so stacked branches line up and their connectors do not cross.
 function treeOrder(streams) {
@@ -278,18 +292,24 @@ function treeOrder(streams) {
   return under(null)
 }
 
-// The same keys parsePlan gives a component, plus `meta` for the line under the title, `landed`
-// of `total` for its bar, `flag` for its corner, `commits` as written, and `at`. A branch's
-// connector is a `needs`, to what it grew from. A folder has no lineage, so it gets a grid
-// place from `col`, and its bar is its share of the repo's commits.
+// The same keys parsePlan gives a component, plus `meta` for the line under the title, its
+// latest commit, `at` for how old that is, `bar` as `n` of `of` or null for none, `foot` for
+// the words on what the bar measures, and `commits` as written. A branch's connector is a
+// `needs`, to what it grew from. A folder has no lineage, so it gets a grid place from `col`,
+// and its bar is its share of the repo's commits.
 export function boardNodes(scan) {
   if (!scan?.mode) return []
-  if (scan.mode === 'streams') return treeOrder(scan.streams).map(streamCard)
+  if (scan.mode === 'streams') {
+    const branches = scan.streams.filter((s) => !s.trunk)
+    const top = Math.max(0, ...branches.map((s) => s.lately))
+    const alone = top > 0 && branches.filter((s) => s.lately === top).length === 1 && branches.length > 1 // a tie has no busiest
+    return treeOrder(scan.streams).map((s) => streamCard(s, scan.days, top, alone))
+  }
   const columns = columnsFor(scan.areas.length)
   const total = scan.counts?.commits ?? 0
   return scan.areas.map((a, i) => card({
     id: areaId(a.path), title: areaTitle(a), path: a.path, col: i % columns, sample: a.sample,
-    tech: counted(a.files, 'file'), meta: `${a.commits} of ${counted(Math.max(total, a.commits), 'commit')} here`,
-    landed: a.commits, total: Math.max(total, a.commits), flag: '', commits: a.recent, at: a.recent[0]?.at ?? 0,
+    tech: counted(a.files, 'file'), meta: a.recent[0]?.s || 'No new commits', foot: `${a.commits} of ${counted(Math.max(total, a.commits), 'commit')} here`,
+    bar: { n: a.commits, of: Math.max(total, a.commits) }, landed: a.commits, total: Math.max(total, a.commits), commits: a.recent, at: a.recent[0]?.at ?? 0,
   }))
 }

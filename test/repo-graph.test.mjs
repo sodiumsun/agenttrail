@@ -10,7 +10,7 @@ import { after, describe, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { areaId, areaTitle, chooseAreas, describeAreas, ownerOf } from '../bin/lib/areas.mjs'
 import { assignCommits, boardNodes, folderLine, keepOrder, parseLog, parseRefs, parseWorktrees, readHistory, streamId } from '../bin/lib/workstreams.mjs'
-import { boardEdges, boardLayout, cardFoot, detailHeight, inferredNote, isUnfolded, liveCard, openingCard } from '../herdr/agenttrail-map/mods/agenttrail-map/graph.js'
+import { boardEdges, boardLayout, cardLine, detailHeight, inferredNote, isUnfolded, liveCard, openingCard } from '../herdr/agenttrail-map/mods/agenttrail-map/graph.js'
 import { freePortBase, startMap, stopAll, tempDir, tempWorld, until } from './helpers.mjs'
 import { hits, scan } from './leak-scan.mjs'
 
@@ -319,7 +319,7 @@ describe('choosing workstreams', () => {
     assert.deepEqual(n.b.needs, [n.a.id])
   })
 
-  test('the bar is the share of a branch\'s commits that reached the trunk', () => {
+  test('a card says how much of a branch reached the trunk', () => {
     const a = on('a', trunkBase, 3, 5)
     const later = on('a2', a[0], 2, 1)
     const onMain = on('m', trunkBase, 1, 4)
@@ -327,17 +327,44 @@ describe('choosing workstreams', () => {
     const out = readHistory({ refs: refsOf(['main', landing.sha], ['a', later[0].sha]), worktrees: [trunkTree(landing.sha)], commits: [landing, ...later, ...a, ...onMain, trunkBase] })
     const n = nodesOf(out)
     assert.deepEqual([n.a.landed, n.a.total, n.a.status], [3, 5, 'pending'])
-    assert.equal(n.a.meta, '3 of 5 commits landed · Underway')
-    assert.equal(n.main.meta, '5 commits landed')
+    assert.equal(n.a.foot, '5 commits in 7 days · 3 of 5 landed')
+    assert.equal(n.main.foot, '5 commits in 7 days, all landed')
     assert.deepEqual(n.a.commits.map(c => c.landed), [false, false, true, true, true])
   })
 
-  test('nothing landed is an empty bar, and all of it landed is complete', () => {
+  test('a card leads with its latest commit, and all of it landed is complete', () => {
     const a = on('a', trunkBase, 2, 3), b = on('b', trunkBase, 2, 2)
     const landing = merge(trunkBase, b[0])
     const n = nodesOf(readHistory({ refs: refsOf(['main', landing.sha], ['a', a[0].sha], ['b', b[0].sha]), worktrees: [trunkTree(landing.sha)], commits: [landing, ...a, ...b, trunkBase] }))
-    assert.deepEqual([n.a.landed, n.a.total, n.a.status, n.a.meta], [0, 2, 'pending', '0 of 2 commits landed · Open'])
-    assert.deepEqual([n.b.landed, n.b.total, n.b.status, n.b.meta], [2, 2, 'done', '2 of 2 commits landed · Complete'])
+    assert.deepEqual([n.a.landed, n.a.total, n.a.status, n.a.meta, n.a.foot], [0, 2, 'pending', 'a 0', '2 commits in 7 days'])
+    assert.deepEqual([n.b.landed, n.b.total, n.b.status, n.b.meta, n.b.foot], [2, 2, 'done', 'b 0', '2 commits in 7 days · 2 of 2 landed'])
+  })
+
+  test('the bar is commits in the window, against the busiest branch', () => {
+    const a = on('a', trunkBase, 8, 3), b = on('b', trunkBase, 2, 2), c = on('c', trunkBase, 1, 1)
+    const n = nodesOf(readHistory({ refs: refsOf(['main', trunkBase.sha], ['a', a[0].sha], ['b', b[0].sha], ['c', c[0].sha]), worktrees: [trunkTree(trunkBase.sha)], commits: [...a, ...b, ...c, trunkBase] }))
+    assert.deepEqual([n.a.bar, n.b.bar, n.c.bar], [{ n: 8, of: 8 }, { n: 2, of: 8 }, { n: 1, of: 8 }])
+    assert.deepEqual([n.a.foot, n.b.foot, n.c.foot], ['Busiest: 8 commits in 7 days', '2 commits in 7 days', '1 commit in 7 days'])
+  })
+
+  test('the bar counts the window, though a card counts the whole branch', () => {
+    const a = on('a', trunkBase, 4, 1), b = on('b', trunkBase, 2, 1)
+    const n = nodesOf(readHistory({ refs: refsOf(['main', trunkBase.sha], ['a', a[0].sha], ['b', b[0].sha]), worktrees: [trunkTree(trunkBase.sha)], commits: [a[0], ...b], days: 30, shape: [...a, ...b, trunkBase].map(c => ({ ...c, files: [] })) }))
+    assert.deepEqual([n.a.total, n.a.bar, n.b.bar], [4, { n: 1, of: 2 }, { n: 2, of: 2 }])
+    assert.deepEqual([n.a.foot, n.b.foot], ['1 commit in 30 days', 'Busiest: 2 commits in 30 days'])
+  })
+
+  test('a trunk has no bar, one branch is not the busiest of anything, and a line stays a line', () => {
+    const a = on('a', trunkBase, 2, 1)
+    const n = nodesOf(readHistory({ refs: refsOf(['main', trunkBase.sha], ['a', a[0].sha]), worktrees: [trunkTree(trunkBase.sha)], commits: [...a, trunkBase] }))
+    assert.equal(n.main.bar, null)
+    assert.equal(n.a.foot, '2 commits in 7 days')
+    const quiet = boardNodes({ mode: 'streams', days: null, streams: [{ id: 'x', key: 'x', name: 'x', lately: 0, commits: 3, landed: 1, recent: [], last: { s: 'old', at: 1 }, folders: [], sample: [], dirty: 12, remote: false }, { id: 'y', key: 'y', name: 'y', lately: 0, commits: 3, landed: 0, recent: [], folders: [], sample: [], remote: true }] })
+    assert.deepEqual(quiet.map(p => [p.meta, p.foot, p.bar]), [['old', '12 uncommitted · No commits in all', { n: 0, of: 0 }], ['No new commits', 'remote · No commits in all', { n: 0, of: 0 }]])
+    const packed = boardNodes({ mode: 'streams', days: 365, streams: [{ id: 'x', key: 'x', name: 'x', lately: 12, commits: 900, landed: 300, recent: [], folders: [], sample: [], dirty: 120 }, { id: 'y', key: 'y', name: 'y', lately: 1, commits: 1, landed: 0, recent: [], folders: [], sample: [] }] })
+    assert.equal(packed[0].foot, '120 uncommitted · 12 commits in 365 days')
+    const trunk = boardNodes({ mode: 'streams', days: 7, streams: [{ id: 'm', key: 'm', name: 'm', trunk: true, remote: true, lately: 259, commits: 259, landed: 259, recent: [], folders: [], sample: [] }] })
+    assert.equal(trunk[0].foot, 'remote · 259 commits in 7 days')
   })
 
   test('a rebased branch that landed counts as landed, by its author time and subject', () => {
@@ -379,20 +406,19 @@ describe('choosing workstreams', () => {
 
 describe('drawing cards from git', () => {
   const pageGraph = (M, open = []) => {
-    const source = ['compLive', 'isUnfolded', 'kids', 'graphTaskIsOpen', 'graphTaskDetails', 'cardCommits', 'inferredNote', 'graphDetailHeight', 'graphNodeMetrics', 'boardLayout', 'nodeStatusIcon', 'nodeAgents', 'nodeAgentChips', 'handoffLabel', 'collapsedGraphNode'].map(fn).join('\n')
+    const source = ['compLive', 'isUnfolded', 'kids', 'graphTaskIsOpen', 'graphTaskDetails', 'cardCommits', 'cardLine', 'inferredNote', 'graphDetailHeight', 'graphNodeMetrics', 'boardLayout', 'nodeStatusIcon', 'nodeAgents', 'nodeAgentChips', 'handoffLabel', 'collapsedGraphNode'].map(fn).join('\n')
     return new Function('M', 'openGraphDetails', 'closedGraphDetails', 'Date', 'esc', `
       const openGraphTasks = new Set(), closedGraphTasks = new Set(), fileMode = false, ns = id => '1:' + id, ago = () => '3s'
       const agentColor = () => '', agentIcon = () => '', agentGlyph = n => n[0]
-      ${page.match(/^const cardFoot=.*$/m)[0]}
       const pct = (done, total) => total ? Math.round(done / total * 100) : 0, statusLabel = s => s
       ${source}
-      return { boardLayout, collapsedGraphNode, inferredNote, cardFoot }`)(M, new Set(open.map(id => `1:${id}`)), new Set(), { now: () => NOW }, (s) => String(s).replace(/</g, '&lt;'))
+      return { boardLayout, collapsedGraphNode, inferredNote, cardLine }`)(M, new Set(open.map(id => `1:${id}`)), new Set(), { now: () => NOW }, (s) => String(s).replace(/</g, '&lt;'))
   }
   const scanned = {
-    mode: 'streams',
+    mode: 'streams', days: 7,
     streams: [
-      { key: 'main', id: streamId('main'), name: 'main', trunk: true, parent: null, at: NOW, commits: 9, landed: 9, recent: [{ s: 'on main', at: NOW, landed: true }], worktree: '/r', folders: ['src'], sample: [] },
-      ...['one', 'two', 'three'].map((name, i) => ({ key: name, id: streamId(name), name, at: NOW - i * HOUR, commits: 13, landed: i ? 0 : 3, parent: streamId(i === 2 ? 'two' : 'main'), recent: [{ s: `${name} latest`, at: NOW, landed: false }, { s: `${name} before`, at: NOW - 1, landed: !i }], worktree: i ? null : '/w', folders: ['src/one', 'test', 'docs'], sample: [] })),
+      { key: 'main', id: streamId('main'), name: 'main', trunk: true, parent: null, at: NOW, commits: 9, lately: 9, landed: 9, recent: [{ s: 'on main', at: NOW, landed: true }], worktree: '/r', folders: ['src'], sample: [] },
+      ...['one', 'two', 'three'].map((name, i) => ({ key: name, id: streamId(name), name, at: NOW - i * HOUR, commits: 13, lately: [2, 4, 8][i], landed: i ? 0 : 3, parent: streamId(i === 2 ? 'two' : 'main'), recent: [{ s: `${name} latest`, at: NOW, landed: false }, { s: `${name} before`, at: NOW - 1, landed: !i }], worktree: i ? null : '/w', folders: ['src/one', 'test', 'docs'], sample: [] })),
     ],
     areas: [],
   }
@@ -441,22 +467,35 @@ describe('drawing cards from git', () => {
     const node = pageGraph(b).collapsedGraphNode(p, 0, boardLayout(b, ui(), NOW).pos[p.id])
     assert.match(node, /class="kicker"[^>]*>src\/one, test, docs</)
     assert.match(node, /class="node-title"[^>]*>one</)
-    assert.match(node, /3 of 13 commits landed · Underway/)
+    assert.match(node, /class="node-meta"[^>]*>one latest</)
+    assert.match(node, /3s<\/tspan> ago/)
+    assert.match(node, /3 of 13 landed/)
     assert.match(node, /class="progress-bg"/)
     const width = Number(node.match(/class="progress" x="16" y="92" width="([\d.]+)"/)[1])
-    assert.equal(width, (400 - 32) * 23 / 100) // pct rounds, as it does for tasks
+    assert.equal(width, (400 - 32) * 25 / 100) // pct rounds, as it does for tasks
     assert.match(node, /SHOW COMMITS ↓/)
     assert.match(node, /obs-file/)
-    assert.match(node, /3s ago/)
     assert.doesNotMatch(node, /tasks|Not started/)
   })
 
-  test('nothing landed draws an empty bar', () => {
+  test('nothing landed still draws a bar that says something, and a trunk draws none', () => {
     const b = board()
     const p = b.plan[2]
     const node = pageGraph(b).collapsedGraphNode(p, 0, boardLayout(b, ui(), NOW).pos[p.id])
-    assert.match(node, /0 of 13 commits landed · Open/)
-    assert.match(node, /class="progress" x="16" y="92" width="0"/)
+    assert.doesNotMatch(node, /landed/)
+    assert.match(node, /class="progress" x="16" y="92" width="184"/) // 4 commits, the busiest had 8
+    const trunk = pageGraph(b).collapsedGraphNode(b.plan[0], 0, boardLayout(b, ui(), NOW).pos[b.plan[0].id])
+    assert.doesNotMatch(trunk, /class="progress/)
+  })
+
+  test('a commit line gives way to what sits in the card\'s corner', () => {
+    const long = 'Keep the first line of a long commit message whole until the corner needs its room'
+    assert.equal(cardLine('Short line', '3 h ago'), 'Short line')
+    assert.ok(cardLine(long, '').length <= 61)
+    assert.ok(cardLine(long, '3 h ago').length < cardLine(long, '').length)
+    assert.ok(cardLine(long, 'a-rather-long-file-name.swift ×12 · 12 min').length < cardLine(long, '3 h ago').length)
+    assert.match(cardLine(long, '3 h ago'), /…$/)
+    assert.doesNotMatch(cardLine(long, 'a-rather-long-file-name.swift ×12 · 12 min'), / …$/)
   })
 
   test('a name cannot reach the page as markup', () => {
@@ -464,20 +503,19 @@ describe('drawing cards from git', () => {
     b.plan[0].title = '<img src=x onerror=alert(1)>'
     b.plan[0].tech = '<img src=y>'
     b.plan[0].meta = '<img src=z>'
-    b.plan[0].flag = '<img src=w>'
+    b.plan[0].foot = '<img src=w>'
     assert.doesNotMatch(pageGraph(b).collapsedGraphNode(b.plan[0], 0, boardLayout(b, ui(), NOW).pos[b.plan[0].id]), /<img/)
   })
 
   test('the page and the mod word a card and the note the same', () => {
-    const ago = () => '5 min'
     const b = board()
-    for (const p of [b.plan[0], { flag: '2 uncommitted', at: 1 }, { flag: 'remote · 1 uncommitted' }, {}]) assert.equal(cardFoot(p, ago), pageGraph(b).cardFoot(p, ago))
+    for (const line of ['short', 'x'.repeat(90), 'word '.repeat(20)]) for (const corner of ['', '3 h ago', 'remote.js ×6 · 5s']) assert.equal(cardLine(line, corner), pageGraph(b).cardLine(line, corner))
     for (const d of [b.derived, { mode: 'areas', days: null, commits: 1 }]) for (const narrow of [true, false]) assert.equal(inferredNote({ derived: d }, narrow), pageGraph(b).inferredNote({ derived: d }, narrow))
   })
 
   test('the note says how many were left out', () => {
     assert.equal(inferredNote(board(), true), 'Inferred from git, last 7 days: 3 of 9 active branches and worktrees shown, 6 left out.')
-    assert.match(inferredNote(board(), false), /14 of 20 worktrees quiet\. A plan adds tasks and progress: npx agenttrail init$/)
+    assert.match(inferredNote(board(), false), /14 of 20 worktrees quiet\. Bars: commits in the last 7 days, against the busiest branch\. A plan adds tasks and progress: npx agenttrail init$/)
   })
 
   test('an opened card lists its commits, and a live one stays shut until asked', () => {
@@ -542,7 +580,8 @@ describe('a real Map with no plan', () => {
     assert.equal(b.derived.days, null, 'a repo this quiet shows all it has')
     const search = card(b, 'feat/search')
     assert.deepEqual(search.commits.map(c => c.s), ['Rank search results', 'Add search box'])
-    assert.equal(search.meta, '0 of 2 commits landed · Open')
+    assert.equal(search.meta, 'Rank search results')
+    assert.equal(search.foot, 'Busiest: 2 commits in all')
     assert.equal(search.total, 2)
     assert.ok(card(b, 'fix/login'))
     assert.ok(!card(b, 'idea/empty'), 'a branch with nothing of its own is not work')
@@ -558,7 +597,7 @@ describe('a real Map with no plan', () => {
     const w = busy()
     put(w.away, { 'web/wip.js': 'x' })
     const b = await cardsOf(await start(w))
-    assert.equal(card(b, 'feat/search').flag, '1 uncommitted')
+    assert.match(card(b, 'feat/search').foot, /^1 uncommitted · /)
   })
 
   test('Map runs only read-only git commands, leaves the repo as it was, and adds nothing', async () => {
@@ -637,7 +676,8 @@ describe('a real Map with no plan', () => {
     await cardsOf(map)
     await hook(map, 's1', quiet, path.join(quiet, 'src/a.js'), 'PreToolUse')
     const m = await until(async () => { const x = await lite(map); return card(x, 'chore/quiet') ? x : null }, 'the card', 10000)
-    assert.equal(card(m, 'chore/quiet').meta, 'No new commits')
+    assert.equal(card(m, 'chore/quiet').meta, 'start')
+    assert.match(card(m, 'chore/quiet').foot, /^No commits in /)
     assert.equal(card(m, 'chore/quiet').commits[0].s, 'start')
   })
 
@@ -671,7 +711,8 @@ describe('a real Map with no plan', () => {
     const b = await cardsOf(await start(w))
     assert.equal(b.derived.mode, 'areas')
     assert.ok(b.plan.every(n => !n.stream && n.commits.length && !n.needs.length))
-    assert.match(b.plan.find(n => n.path === 'lib').meta, /^1 of \d+ commits here$/)
+    assert.match(b.plan.find(n => n.path === 'lib').foot, /^1 of \d+ commits here$/)
+    assert.equal(b.plan.find(n => n.path === 'lib').meta, 'Add the importer')
     assert.ok(b.plan.some(n => n.path === 'lib' && n.commits[0].s === 'Add the importer'))
   })
 
