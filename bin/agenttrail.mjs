@@ -13,6 +13,8 @@ import { hasMapRelay, repointRelays } from './lib/hooks.mjs'
 import { ClaudeLogReader, SUBAGENT_TOOL, subagentName, toolDetail as describeTool } from './lib/claude.mjs'
 import { CodexLogReader } from './lib/codex.mjs'
 import { panelFeed } from './lib/panel.mjs'
+import { IGNORE, TMP_FILE, areaId, areaNodes, coarseChange, ownerOf } from './lib/areas.mjs'
+import { Worker } from 'node:worker_threads'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -186,6 +188,8 @@ function parsePlan(text) {
 const session = { id: Math.random().toString(36).slice(2, 10), project: path.basename(repo), startedAt: new Date().toISOString() }
 let planText = safeRead(planPath)
 let parsed = parsePlan(planText)
+const inferring = () => planText.length === 0 // no plan: the map is built from the repo's folders
+let areaScan = null // { list, source, files, truncated, scannedAt, splitAt, settling }
 let activity = null // { file, at } — most recent non-plan repo write
 let recentActivity = [] // last N writes, newest first — feeds the live-view drill-down
 let planMtime = statMtime(planPath)
@@ -198,10 +202,11 @@ const clients = new Set()
 const compTouched = {} // component id -> last matching write ts
 const compRecent = {} // component id -> [{file, at}] newest first — feeds capsule work lines
 const fileHeat = {} // file -> last touch ts, capped
+const fileRuns = {} // file -> sessions that wrote it, capped with fileHeat; only kept for a repo with no plan
 function heatFile(file, at) {
   fileHeat[file] = at
   const keys = Object.keys(fileHeat)
-  if (keys.length > 600) { keys.sort((a, b) => fileHeat[a] - fileHeat[b]); for (const k of keys.slice(0, 100)) delete fileHeat[k] }
+  if (keys.length > 600) { keys.sort((a, b) => fileHeat[a] - fileHeat[b]); for (const k of keys.slice(0, 100)) { delete fileHeat[k]; delete fileRuns[k] } }
 }
 function globToRe(g) {
   if (!/[*?]/.test(g)) return new RegExp('^' + g.replace(/[.+^${}()|[\]\\]/g, '\\$&') + '(/|$)')
@@ -210,6 +215,7 @@ function globToRe(g) {
 }
 let compMatchers = []
 function rebuildMatchers() {
+  if (inferring()) { compMatchers = parsed.nodes.map(n => ({ id: n.id, res: [{ test: f => ownerArea(f) === n.id }] })); return } // a file has one area, its deepest
   compMatchers = parsed.nodes.filter(n => n.level === 'component' && n.files.length)
     .map(c => ({ id: c.id, res: c.files.map(globToRe) }))
 }
@@ -217,6 +223,10 @@ function touchComponents(file, at) {
   for (const m of compMatchers) if (m.res.some(re => re.test(file))) {
     compTouched[m.id] = Math.max(compTouched[m.id] || 0, at)
     const arr = compRecent[m.id] || (compRecent[m.id] = [])
+    if (inferring()) {
+      compRecent[m.id] = [{ file, at }, ...arr.filter(x => x.file !== file)].sort((a, b) => b.at - a.at).slice(0, 6)
+      continue
+    }
     if (arr[0] && arr[0].file === file) arr[0] = { file, at, n: (arr[0].n || 1) + 1 }
     else arr.unshift({ file, at, n: 1 })
     if (arr.length > 6) arr.length = 6
@@ -259,9 +269,10 @@ function noteRunFile(run, rel, at) {
   heatFile(rel, Math.max(fileHeat[rel] || 0, at))
   touchComponents(rel, at)
   if (!activity || at >= activity.at) activity = { file: rel, at }
+  if (inferring()) noteAreaWriter(run, rel, at)
   for (const m of compMatchers) if (m.res.some(re => re.test(rel))) {
     if (run.componentId !== m.id) {
-      (run.path = run.path || []).push({ c: m.id, at })
+      (run.path = run.path || []).push({ c: m.id, at, ...(inferring() ? { f: rel } : {}) })
       const prev = Object.values(runs).find(r2 => r2.id !== run.id && r2.ended && r2.componentId === m.id && at >= r2.lastEventAt && at - r2.lastEventAt < 10 * 60e3)
       if (prev) { handoffs.push({ c: m.id, from: prev.agent, to: run.agent, at }); if (handoffs.length > 10) handoffs.shift() }
     }
@@ -422,13 +433,15 @@ function loadState() {
   try {
     const st = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
     activity = st.activity || null
-    recentActivity = st.recentActivity || []
+    recentActivity = (st.recentActivity || []).filter((a, i, all) => all.findIndex(x => x.file === a.file) === i && !isFolder(a.file))
     Object.assign(runs, st.runs || {})
     for (const r of Object.values(runs)) if ((r.source || 'hook') === 'hook') r.hookAt ??= r.lastEventAt // saved before logs were read
     cycles = st.cycles || []
     Object.assign(compTouched, st.compTouched || {})
     Object.assign(compRecent, st.compRecent || {})
     Object.assign(fileHeat, st.fileHeat || {})
+    Object.assign(fileRuns, st.fileRuns || {})
+    areaScan = st.areaScan || null
     codexCursors = st.codexCursors || {}
     claudeCursors = st.claudeCursors || {}
   } catch {}
@@ -438,7 +451,7 @@ function saveState() {
   stateDirty = false
   try {
     fs.mkdirSync(path.dirname(stateFile), { recursive: true, mode: 0o700 })
-    fs.writeFileSync(stateFile, JSON.stringify({ repoPath: repo, port, activity, recentActivity, compTouched, compRecent, runs, fileHeat, cycles, codexCursors, claudeCursors }), { mode: 0o600 })
+    fs.writeFileSync(stateFile, JSON.stringify({ repoPath: repo, port, activity, recentActivity, compTouched, compRecent, runs, fileHeat, cycles, codexCursors, claudeCursors, ...(inferring() ? { fileRuns, areaScan } : {}) }), { mode: 0o600 })
     fs.chmodSync(stateFile, 0o600) // it holds the start of commands, and earlier versions left it readable
   } catch {}
 }
@@ -448,10 +461,6 @@ setInterval(saveState, 15000).unref()
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { stateDirty = true; saveState(); process.exit(0) })
 
 // ---------- repo tree (vs-code-style explorer, folders first) ----------
-const IGNORE = /(^|\/)(\.git|node_modules|\.agenttrail|dist|build|\.next|__pycache__|\.venv|\.build|\.pytest_cache|\.ruff_cache|\.cache|\.DS_Store)(\/|$)/
-// editor/tool atomic-write droppings — not real activity targets
-const TMP_FILE = /(\.tmp(\.|$)|~$|\.swp$|\.swx$|(^|\/)\.#|(^|\/)#.+#$|\.DS_Store$)/
-
 function buildTree(rootDir, budgetN = 4000, perDir = 250) {
   treeTruncated = false
   const root = []
@@ -484,10 +493,163 @@ let treeDirty = false
 let lastTreeSent = Date.now()
 rebuildMatchers()
 
+// ---------- inferred areas: the map of a repo with no plan ----------
+// Areas go in where a plan's components go, so the live layer pins work to them with the
+// same code. The list comes off a worker, and only on the coarse rule below does it change:
+// a poll reads what is held here, and a file write only marks the list as due a look.
+const AREA_QUIET_MS = 5 * 60e3 // a listing runs at most this often while files change
+const AREA_EMPTY_MS = 3000 // a repo with no cards yet is worth looking at again soon
+const AREA_SETTLE_MS = 15000 // logs replay after the first listing, so look once more with that work known
+const AREA_RESPLIT_MS = 30 * 60e3 // cards can move no more often than this
+const AREA_HOT_MS = 14 * 86400e3
+const AREA_CHANGED_MS = 86400e3
+const AGENT_HEAT = 3 // a write an agent made counts over one the watcher only saw
+let areaTimer = null
+let areaRunning = false
+let areaIgnored = new Set()
+let areaOwners = new Map()
+
+function folderPrefixed(p) {
+  const inside = p + '/'
+  return Object.keys(fileHeat).some(f => f.startsWith(inside))
+}
+function isIgnoredPath(f) {
+  if (!areaIgnored.size) return false
+  for (let at = f; at; at = at.includes('/') ? at.slice(0, at.lastIndexOf('/')) : '') if (areaIgnored.has(at)) return true
+  return false
+}
+const ownerArea = file => ownerOf(areaOwners, file)
+function useAreas() {
+  const list = areaScan?.list || []
+  parsed.nodes = areaNodes(list)
+  areaOwners = new Map(list.map(a => [a.path, areaId(a.path)]))
+  rebuildMatchers()
+}
+function noteRecent(entry) {
+  recentActivity = [entry, ...recentActivity.filter(a => a.file !== entry.file)].slice(0, 12)
+}
+function noteAreaWriter(run, rel, at) {
+  run.areaFile = rel
+  if (!recentActivity.some(a => a.file === rel && a.at >= at)) noteRecent({ file: rel, at })
+  const list = fileRuns[rel] || (fileRuns[rel] = [])
+  const id = String(run.id).slice(0, 12)
+  if (!list.includes(id) && list.length < 8) list.push(id)
+}
+// Activity is kept per card, so new cards take it over from the files it came from.
+function rehomeActivity() {
+  for (const key of Object.keys(compTouched)) delete compTouched[key]
+  for (const key of Object.keys(compRecent)) delete compRecent[key]
+  for (const f of Object.keys(fileHeat)) if (isFolder(f)) delete fileHeat[f]
+  for (const [file, at] of Object.entries(fileHeat).sort((a, b) => b[1] - a[1])) {
+    const id = ownerArea(file)
+    if (!id) continue
+    compTouched[id] = Math.max(compTouched[id] || 0, at)
+    const list = compRecent[id] || (compRecent[id] = [])
+    if (list.length < 6) list.push({ file, at })
+  }
+  for (const r of Object.values(runs)) {
+    const stops = (r.path || []).map(s => ({ ...s, c: s.f ? ownerArea(s.f) : null })).filter(s => s.c)
+    r.path = stops.filter((s, i) => i === 0 || s.c !== stops[i - 1].c)
+    r.componentId = r.areaFile ? ownerArea(r.areaFile) : null
+  }
+}
+function dropAreas() {
+  const isArea = id => String(id).startsWith('area-')
+  for (const key of Object.keys(compTouched)) if (isArea(key)) delete compTouched[key]
+  for (const key of Object.keys(compRecent)) if (isArea(key)) delete compRecent[key]
+  for (const r of Object.values(runs)) {
+    if (r.path) r.path = r.path.filter(s => !isArea(s.c))
+    if (isArea(r.componentId)) r.componentId = null
+  }
+  areaScan = null
+  areaOwners = new Map()
+  clearTimeout(areaTimer)
+  areaTimer = null
+  stateDirty = true
+}
+function listRepo() {
+  const heat = {}
+  const since = Date.now() - AREA_HOT_MS
+  for (const [file, at] of Object.entries(fileHeat)) if (at >= since) heat[file] = fileRuns[file] ? AGENT_HEAT : 1
+  const current = (areaScan?.list || []).map(a => a.path)
+  return new Promise(resolve => {
+    const worker = new Worker(new URL('./lib/areas-scan.mjs', import.meta.url), { workerData: { repo, heat, current } })
+    worker.unref()
+    worker.once('message', resolve)
+    worker.once('error', () => resolve(null))
+    worker.once('exit', () => resolve(null))
+  })
+}
+async function scanAreas() {
+  if (areaRunning) return
+  areaRunning = true
+  const seen = await listRepo()
+  areaRunning = false
+  if (!seen || !inferring()) return
+  const now = Date.now()
+  const next = { list: seen.next, files: seen.files }
+  areaIgnored = new Set(seen.ignored)
+  const first = !areaScan?.list.length
+  const settling = areaScan?.settling && now >= areaScan.scannedAt + AREA_SETTLE_MS
+  const moved = first || (settling ? seen.next.some(a => !areaScan.list.some(x => x.path === a.path)) : now >= areaScan.splitAt + AREA_RESPLIT_MS && coarseChange(areaScan, next))
+  const keep = !first && !moved
+  const counted = new Map(seen.current.map(a => [a.path, a]))
+  areaScan = {
+    list: keep ? areaScan.list.map(a => counted.get(a.path) ?? { ...a, count: 0, sample: [] }) : seen.next, // kept cards keep their places
+    source: seen.source, files: seen.files, truncated: seen.truncated, scannedAt: now,
+    splitAt: keep ? areaScan.splitAt : now,
+    settling: first && seen.next.length > 0,
+  }
+  useAreas()
+  if (moved) rehomeActivity()
+  stateDirty = true
+  broadcast()
+  if (areaScan.settling) areaDue(AREA_SETTLE_MS)
+}
+function areaDue(wait) {
+  if (areaTimer || !inferring()) return
+  areaTimer = setTimeout(() => { areaTimer = null; scanAreas() }, wait)
+  areaTimer.unref()
+}
+function areaStats() {
+  const stats = {}, sessions = {}
+  for (const a of areaScan?.list || []) { const id = areaId(a.path); stats[id] = { changed: 0, sessions: 0 }; sessions[id] = new Set() }
+  const since = Date.now() - AREA_CHANGED_MS
+  for (const [file, at] of Object.entries(fileHeat)) {
+    const id = ownerArea(file)
+    if (!id || !stats[id]) continue
+    if (at >= since) stats[id].changed += 1
+    for (const r of fileRuns[file] || []) sessions[id].add(r)
+  }
+  for (const id of Object.keys(stats)) stats[id].sessions = sessions[id].size
+  return stats
+}
+if (inferring()) useAreas()
+const firstAreaScan = inferring() ? scanAreas() : null
+
 function safeRead(p) { try { return fs.readFileSync(p, 'utf8') } catch { return '' } }
 function statMtime(p) { try { return fs.statSync(p).mtimeMs } catch { return null } }
+// A folder that has just gone can only be told from a file by what was seen inside it.
+function isFolder(rel) {
+  try {
+    const st = fs.statSync(path.join(repo, rel), { throwIfNoEntry: false })
+    return st ? st.isDirectory() : folderPrefixed(rel)
+  } catch { return false }
+}
+function readPlan() {
+  const was = inferring()
+  planText = safeRead(planPath)
+  parsed = parsePlan(planText)
+  planMtime = statMtime(planPath)
+  if (inferring()) { useAreas(); if (!areaScan) areaDue(0) }
+  else { if (was) dropAreas(); rebuildMatchers() }
+}
 
 function compFilesFor(id) {
+  if (inferring()) {
+    const area = (areaScan?.list || []).find(a => areaId(a.path) === id)
+    return [...new Set([...(compRecent[id] || []).map(x => x.file), ...(area?.sample || [])])].slice(0, 24)
+  }
   const m = compMatchers.find(x => x.id === id)
   if (!m) return []
   const out = []
@@ -532,17 +694,19 @@ function planStaleness() {
   const fresh = Date.now() - activity.at < 15 * 60e3
   return gap > 20 * 60e3 && fresh ? { stale: true, minutes: Math.round(gap / 60e3) } : { stale: false }
 }
-function model() {
-  if (treeDirty) { tree = buildTree(repo); treeDirty = false }
+function model({ lite = false } = {}) {
+  if (treeDirty && !(lite && inferring())) { tree = buildTree(repo); treeDirty = false } // inferred cards never read the tree, so a poll need not walk it
+  const stats = inferring() ? areaStats() : null
   return {
     boards, port,
     runs: liveRuns(),
-    session, plan: parsed.nodes.map(n => n.level === 'component' ? { ...n, touchedAt: compTouched[n.id] || null, recent: compRecent[n.id] || [], filesList: compFilesFor(n.id) } : n), tree,
+    session, plan: parsed.nodes.map(n => n.level === 'component' ? { ...n, touchedAt: compTouched[n.id] || null, recent: compRecent[n.id] || [], filesList: compFilesFor(n.id), ...(stats ? { stats: stats[n.id] } : {}) } : n), tree,
     planTitle: parsed.title,
     hasPlan: planText.length > 0, treeTruncated,
     activity, recentActivity, planMtime, handoffs, hotFiles: hotFiles(), cycles,
     planStale: planStaleness(), lints: lintPlan(), hooksInstalled: hooksInstalled(),
     now: Date.now(),
+    ...(inferring() ? { derived: { from: 'folders and activity', source: areaScan?.source ?? null, files: areaScan?.files ?? 0, truncated: Boolean(areaScan?.truncated), scannedAt: areaScan?.scannedAt ?? null } } : {}),
   }
 }
 
@@ -553,7 +717,7 @@ function send(obj) {
 function broadcast() { send(model()) }
 // activity ticks carry only what moved — the 600KB tree stays home
 function broadcastTick() {
-  send({ partial: true, runs: liveRuns(), activity, recentActivity, touched: { ...compTouched }, compRecent, handoffs, hotFiles: hotFiles(), now: Date.now() })
+  send({ partial: true, runs: liveRuns(), activity, recentActivity, touched: { ...compTouched }, compRecent, handoffs, hotFiles: hotFiles(), now: Date.now(), ...(inferring() ? { areaStats: areaStats() } : {}) })
 }
 
 // ---------- watcher ----------
@@ -565,24 +729,21 @@ try {
     if (IGNORE.test(f) || TMP_FILE.test(f)) return
     if (path.resolve(repo, f) === planPath) {
       clearTimeout(planDebounce)
-      planDebounce = setTimeout(() => {
-        planText = safeRead(planPath)
-        parsed = parsePlan(planText)
-        rebuildMatchers()
-        planMtime = statMtime(planPath)
-        broadcast()
-      }, 150)
+      planDebounce = setTimeout(() => { readPlan(); broadcast() }, 150)
       return
     }
+    if (inferring() && isIgnoredPath(f)) return // a build folder is not work on this repo
     // plain repo churn → liveness signal
     treeDirty = true
     stateDirty = true
-    activity = { file: f, at: Date.now() }
-    heatFile(f, activity.at)
-    touchComponents(f, activity.at)
-    if (!recentActivity.length || recentActivity[0].file !== f) recentActivity.unshift(activity)
-    else recentActivity[0] = activity
-    recentActivity = recentActivity.slice(0, 12)
+    const folder = isFolder(f)
+    if (inferring()) areaDue(areaScan?.list.length ? AREA_QUIET_MS : AREA_EMPTY_MS)
+    if (!(folder && inferring())) {
+      activity = { file: f, at: Date.now() }
+      heatFile(f, activity.at)
+      touchComponents(f, activity.at)
+    }
+    if (!folder) noteRecent(activity)
     throttleBroadcast()
   })
 } catch (e) {
@@ -594,13 +755,7 @@ try {
       const f = filename.toString()
       if (path.resolve(repo, f) === planPath) {
         clearTimeout(planDebounce)
-        planDebounce = setTimeout(() => {
-          planText = safeRead(planPath)
-          parsed = parsePlan(planText)
-          rebuildMatchers()
-          planMtime = statMtime(planPath)
-          broadcast()
-        }, 150)
+        planDebounce = setTimeout(() => { readPlan(); broadcast() }, 150)
       }
     })
     console.error('note: recursive file watching unavailable here — plan updates still live, deep file activity limited')
@@ -638,7 +793,7 @@ setInterval(discoverBoards, 30000).unref()
 function summaryModel() {
   return {
     port, project: session.project, hasPlan: planText.length > 0,
-    components: parsed.nodes.filter(n => n.level === 'component').map(n => ({ id: n.id, title: n.title, status: n.status, touchedAt: compTouched[n.id] || null })),
+    components: inferring() ? [] : parsed.nodes.filter(n => n.level === 'component').map(n => ({ id: n.id, title: n.title, status: n.status, touchedAt: compTouched[n.id] || null })),
     runs: liveRuns().map(r => ({ id: r.id, provider: r.provider, status: r.status, terminalId: r.terminalId, agent: r.agent, ended: r.ended, componentId: r.componentId, startedAt: r.startedAt, tool: r.currentTool ? `${r.currentTool.name} · ${r.currentTool.detail}` : null, todos: (r.todos || []).length, todosDone: (r.todos || []).filter(t => t.status === 'completed').length })),
     activity,
   }
@@ -649,7 +804,7 @@ function panelModel() {
     // through a symlink would otherwise match nothing.
     project: session.project, repoPath: repoRoots.at(-1), port,
     hasPlan: planText.length > 0,
-    components: parsed.nodes.filter(n => n.level === 'component'),
+    components: inferring() ? [] : parsed.nodes.filter(n => n.level === 'component'), // the list panel's paths are a plan's
     runs: liveRuns(),
     sources: {
       hooks: hooksInstalled(),
@@ -660,7 +815,7 @@ function panelModel() {
   })
 }
 function liteModel() {
-  const m = model()
+  const m = model({ lite: true })
   const { tree, treeTruncated, ...rest } = m
   return { ...rest, port, project: session.project }
 }
@@ -783,7 +938,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(out.slice(0, 15)))
   } else if (u.pathname === '/setup' && req.method === 'POST') {
     init({ ask: false }).then(() => { // pressing Set up was the answer; a prompt in the terminal would hang the request
-      planText = safeRead(planPath); parsed = parsePlan(planText); rebuildMatchers(); planMtime = statMtime(planPath)
+      readPlan()
       hooksInstalledCache.at = 0
       broadcast()
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, prompt: BACKFILL_PROMPT }))
@@ -899,7 +1054,7 @@ async function firstRunFlow() {
   console.log('\nno PLAN.md here yet — the live layer works now; the map needs a plan.')
   if (await askYesNo('set up the plan convention (PLAN.md skeleton + agent instructions + local hooks)? [Y/n] ')) {
     await init()
-    planText = safeRead(planPath); parsed = parsePlan(planText); rebuildMatchers(); planMtime = statMtime(planPath)
+    readPlan()
     const copied = await copyToClipboard(BACKFILL_PROMPT)
     console.log(copied
       ? 'backfill prompt is on your clipboard — paste it to your agent in this repo and the map draws itself.'
@@ -907,10 +1062,15 @@ async function firstRunFlow() {
     broadcast()
   }
 }
-function onListen() {
-  publishActionToken()
+function startLogs() {
   pollLogs()
   setInterval(pollLogs, 2000).unref()
+}
+function onListen() {
+  publishActionToken()
+  // A log is read once, so its work must land on cards: with no plan they come first.
+  if (firstAreaScan) Promise.race([firstAreaScan, new Promise(r => setTimeout(r, 3000))]).then(startLogs)
+  else startLogs()
   console.log(`agenttrail · ${session.project} · http://localhost:${port}`)
   if (!planText) console.log('no PLAN.md found — run `agenttrail init` in the repo to scaffold one')
   if (openBrowser && !noOpen) {

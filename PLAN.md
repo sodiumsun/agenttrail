@@ -31,6 +31,9 @@ tech: svg flow diagram + task capsules
 needs: [plan-reader]
 links: [explorer]
 files: [public/**, assets/brand/**]
+- [x] Draw a map for any repo, with no plan needed {#map-inferred}
+  tech: bin/lib/areas.mjs, areas chosen on a worker from git ls-files and activity
+  by: claude
 - [x] Show components and how they connect {#map-graph}
   tech: needs = arrows, links = dashed, deterministic layout
   by: claude

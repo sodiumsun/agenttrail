@@ -7,7 +7,7 @@ import { h_flex, v_flex } from "gpui-base";
 import { appHome, exec, focused, home, layout, nextCommand, panes, props, run, settings, setShared, shared, spaces } from "herdr";
 import * as fs from "fs/promises";
 import { Feed, POLL_MS, PORT_BASE, focusFolder, repoName } from "./feed.js";
-import { REGION_HEAD, REGION_X, REGION_Y, ago, boardEdges, boardLayout, cardAgents, hostOf, kids, liveCard, statusLabel, taskDetails, taskIsOpen, touched } from "./graph.js";
+import { REGION_HEAD, REGION_X, REGION_Y, ago, areaFiles, areaLines, boardEdges, boardLayout, cardAgents, hostOf, kids, liveCard, statusLabel, taskDetails, taskIsOpen, touched } from "./graph.js";
 
 const MOD = "agenttrail-map";
 const ASSET = `mods/${MOD}`;
@@ -19,6 +19,7 @@ const START_WAIT_MS = 60000; // a first npx download takes a while; past this, o
 const NARROW = 560; // below this the whole graph is unreadable, so open on one card
 const SIDE_DOCK = 1040; // below this a run dock at the top right would sit on a centred card
 const AWAY_H = 30; // the strip saying a Map was picked by hand
+const INFERRED_NOTE = "Inferred from folders and activity. Add a plan for tasks and progress: npx agenttrail init";
 const SANS = "Geist";
 const MONO = "Geist Mono";
 const DOT = 24; // Map's background dots: fixed to the screen, they neither pan nor zoom
@@ -38,6 +39,7 @@ const SOURCE = { hook: "hooks", "claude-log": "local log", "codex-log": "local l
 const lit = () => settings()?.dark === false;
 const shortPath = (p) => { const h = home(); return h && p?.startsWith(`${h}/`) ? `~${p.slice(h.length)}` : p ?? ""; };
 const hasCards = (b) => Boolean(b?.plan.some((n) => n.level === "component"));
+const inferred = (b) => Boolean(b?.derived && hasCards(b));
 const gitRoot = async (cwd) => {
   const git = await exec("git", ["rev-parse", "--show-toplevel"], { cwd });
   return git.code === 0 ? git.stdout.trim() : null;
@@ -295,7 +297,11 @@ export default class AgenttrailMap extends View {
   }
 
   headH() {
-    return (this.narrow() ? 44 : 64) + (this.feed.state.away ? AWAY_H : 0);
+    return (this.narrow() ? 44 : 64) + (this.feed.state.away ? AWAY_H : 0) + (inferred(this.feed.board) ? this.noteH() : 0);
+  }
+
+  noteH() {
+    return this.narrow() ? 46 : AWAY_H; // two lines fit a panel, where the note will not go on one
   }
 
   // The stage changed under a view that is already placed: its middle stays its middle,
@@ -409,7 +415,50 @@ export default class AgenttrailMap extends View {
     return box(div()).flex().items_center().justify_center().text_size(11 * z).font_weight(700).font_family(SANS).text_color(agentColor(c, name)).child(String(name)[0].toUpperCase());
   }
 
+  // A card for a folder: what was seen happen there, and no progress, since nothing says
+  // what done would be. No ports either: only a trail connects these.
+  areaCard(c, b, p, pos, now) {
+    const z = this.zoom, w = pos.nodeW, h = pos.nodeH;
+    const open = pos.h > h;
+    const live = touched(p, now);
+    const names = cardAgents(b, p);
+    const { meta, last } = areaLines(p, (at) => ago(at, now));
+    const edge = open ? c.accent : c.line;
+    return div().id(`n-${p.id}`).absolute()
+      .left(this.pan.x + (REGION_X + pos.nodeX) * z).top(this.pan.y + (REGION_Y + REGION_HEAD + pos.nodeY) * z).w(w * z).h(h * z)
+      .rounded(12 * z).bg(c.card).border(open ? 1.5 : 1).border_color(edge).cursor_pointer()
+      .hover((s) => s.bg(c.cardHover).border_color(open ? edge : c.faint))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { this.toggle(p); cx.notify(); })
+      .child(this.text(p.tech, { x: 16, y: 24, size: 11, color: c.faint, mono: true, weight: 500 }))
+      .when(live, (el) => el
+        .child(svg(`${ASSET}/arc-live.svg`).absolute().left((w - 41) * z).top(11 * z).w(30 * z).h(30 * z).text_color(c.accent).spin(1300))
+        .child(this.text("Editing", { right: 44 + 24 * Math.min(names.length, 3), y: 30, size: 11, color: c.accent, weight: 600 })))
+      .children(names.map((n, i) => this.agentMark(c, n, w - 26 - 24 * (i + 1), 26, 13)))
+      .child(this.text(p.title, { x: 16, y: 52, size: 15, color: c.text, weight: 600 }))
+      .child(this.text(meta, { x: 16, y: 76, size: 12, color: c.dim }))
+      .when(Boolean(last), (el) => el.child(this.text(last, { x: 16, y: 96, size: 11, color: live ? c.accent : c.dim, mono: true })))
+      .child(this.text(open ? "HIDE FILES ↑" : "SHOW FILES ↓", { x: 16, y: 116, size: 11, color: open ? c.accent : c.faint, mono: true, weight: 500 }));
+  }
+
+  // Its recent files, each once, for a card someone opened.
+  areaDetail(c, p, pos, now) {
+    const z = this.zoom;
+    const x = this.pan.x + (REGION_X + pos.x) * z, y = this.pan.y + (REGION_Y + REGION_HEAD + pos.nodeY + pos.nodeH + 24) * z;
+    const dot = () => div().w(6 * z).h(6 * z).rounded(6 * z).bg(c.faint); // an element can go in one place only
+    const files = areaFiles(p);
+    return [
+      div().absolute().left(x + pos.nodeW / 2 * z).top(y - 24 * z).w(1).h(24 * z).bg(c.faint),
+      div().id(`d-${p.id}`).absolute().left(x).top(y).w(pos.detailW * z).h(pos.detailH * z).rounded(16 * z).bg(c.surface).overflow_hidden()
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .children(files.length
+          ? files.map((a, i) => this.plainRow(c, i * 45, dot(), a.file, div().flex_none().text_size(12 * z).text_color(c.dim).child(ago(a.at, now))))
+          : [this.text("No activity seen here yet.", { x: 16, y: 38, size: 12, color: c.dim })]),
+    ];
+  }
+
   card(c, b, p, pos, now) {
+    if (p.derived) return this.areaCard(c, b, p, pos, now);
     const z = this.zoom, w = pos.nodeW, h = pos.nodeH;
     const list = kids(b, p.id);
     const done = list.filter((n) => n.status === "done").length;
@@ -490,6 +539,7 @@ export default class AgenttrailMap extends View {
   }
 
   detail(c, b, p, pos, now) {
+    if (p.derived) return this.areaDetail(c, p, pos, now);
     const z = this.zoom;
     const list = kids(b, p.id);
     const stageH = this.stage().height;
@@ -600,7 +650,7 @@ export default class AgenttrailMap extends View {
         .when(!narrow, (el) => el.child(div().truncate().text_size(12).text_color(c.dim).child(this.subtitle()))))
       .when(Boolean(b), (el) => el.child(h_flex().flex_none().h(24).px(8).gap(6).items_center().rounded(8).border(1).border_color(c.line).text_size(12).text_color(working ? c.success : c.dim)
         .child(div().w(6).h(6).rounded(6).bg(working ? c.success : c.faint))
-        .child(working ? (narrow ? `${ago(b.activity.at, now)} ago` : `Working · ${ago(b.activity.at, now)} ago`) : !hasCards(b) ? "Watching" : narrow ? "Live" : "Plan is live")))
+        .child(working ? (narrow ? `${ago(b.activity.at, now)} ago` : `Working · ${ago(b.activity.at, now)} ago`) : !hasCards(b) ? "Watching" : b.derived ? "Inferred" : narrow ? "Live" : "Plan is live")))
       .when(host.kind !== "lone", (el) => el.child(this.tool(c, "size", svg(`${ASSET}/${big ? "collapse" : "expand"}.svg`).w(14).h(14), (_e, cx) => { this.toggleSize(); cx.notify(); })));
   }
 
@@ -610,6 +660,13 @@ export default class AgenttrailMap extends View {
       .child(div().flex_1().min_w(0).truncate().text_color(c.dim).child(`Not your terminal's repo, ${repo}`))
       .child(div().id("back").flex_none().text_color(c.accent).cursor_pointer().hover((s) => s.text_color(c.text)).child("Back")
         .on_click((_e, cx) => { this.feed.back(); this.wake?.(); cx.notify(); }));
+  }
+
+  // Map's honesty rule: never let a guess read as a plan.
+  inferredNote(c) {
+    const narrow = this.narrow();
+    return v_flex().id("inferred").h(this.noteH()).px(narrow ? 12 : 24).justify_center().flex_none().bg(c.surface).border_b(1).border_color(c.hover)
+      .text_size(12).text_color(c.dim).child(div().w_full().when(!narrow, (el) => el.truncate()).child(INFERRED_NOTE));
   }
 
   button(c, id, text, action) {
@@ -655,7 +712,7 @@ export default class AgenttrailMap extends View {
     return v_flex().id("no-plan").size_full().min_h(0).p(this.narrow() ? 16 : 24).overflow_y_scrollbar()
       .child(v_flex().w_full().max_w(640).flex_none()
         .child(div().text_size(15).font_weight(600).text_color(c.text).child(`Watching ${b.project}`))
-        .child(div().mt(6).text_size(13).text_color(c.dim).child("The component map needs a plan: run npx agenttrail init in this repo."))
+        .child(div().mt(6).text_size(13).text_color(c.dim).child(b.derived ? "Nothing to draw yet. Cards appear once this repo has files." : "The component map needs a plan: run npx agenttrail init in this repo."))
         .child(label("SESSIONS"))
         .child(v_flex().gap(8).children(runs.map((r) => this.runCard(c, b, r, now))))
         .when(!runs.length, (el) => el.child(quiet("No agent sessions seen yet.")))
@@ -682,7 +739,7 @@ export default class AgenttrailMap extends View {
     this.parts.edges = Date.now() - this.t0;
     return [
       div().absolute().left(this.pan.x + REGION_X * z).top(this.pan.y + REGION_Y * z).w(region.w * z).h(region.h * z).rounded(26 * z).bg(c.region).border(1.5).border_color(c.line)
-        .child(this.text(String(b.project ?? "").toUpperCase(), { x: 28, y: 38, size: 15, color: c.faint, mono: true, weight: 600 })),
+        .child(this.text(`${String(b.project ?? "").toUpperCase()}${b.derived ? " · INFERRED" : ""}`, { x: 28, y: 38, size: 15, color: c.faint, mono: true, weight: 600 })),
       edges,
       ...this.geo.edges.filter((e) => e.agent).map((e) => {
         const mx = (e.curve.x1 + e.curve.x2) / 2, my = (e.curve.y1 + e.curve.y2) / 2 - (e.arrow ? 10 : 8);
@@ -712,6 +769,7 @@ export default class AgenttrailMap extends View {
       })
       .child(this.header(c, b, now))
       .when(Boolean(this.feed.state.away), (el) => el.child(this.away(c)))
+      .when(inferred(b), (el) => el.child(this.inferredNote(c)))
       .child(div().id("canvas").relative().flex_1().min_h(0).overflow_hidden().bg(c.bg)
         .when(Boolean(this.press), (el) => el.cursor_grabbing())
         .when(ready && !this.press, (el) => el.cursor_grab())

@@ -12,7 +12,8 @@ const TRAIL_MS = 45 * 60e3;
 export const kids = (b, id) => b.plan.filter((n) => n.parent === id);
 export const touched = (p, now) => Boolean(p.touchedAt && now - p.touchedAt < LIVE_MS);
 export const compLive = (b, p, now) => p.status === "active" || touched(p, now) || (b.runs ?? []).some((r) => !r.ended && r.componentId === p.id);
-export const isUnfolded = (b, p, ui, now) => !ui.closed.has(p.id) && (ui.open.has(p.id) || compLive(b, p, now));
+// An inferred card opens only when asked: a file write must not push the cards below it.
+export const isUnfolded = (b, p, ui, now) => !ui.closed.has(p.id) && (ui.open.has(p.id) || (!p.derived && compLive(b, p, now)));
 export const taskIsOpen = (task, ui) => ui.openTasks.has(task.id) || (!ui.closedTasks.has(task.id) && task.status === "active");
 
 export function taskDetails(b, task, ago) {
@@ -25,7 +26,20 @@ export function taskDetails(b, task, ago) {
   return { rows, live };
 }
 
+// What an inferred card says about itself. Observed activity only: it has no tasks to count.
+export const areaFiles = (p) => (p.recent ?? []).slice(0, 6);
+export function areaLines(p, ago) {
+  const { changed = 0, sessions = 0 } = p.stats ?? {};
+  const parts = [];
+  if (changed) parts.push(`${changed} file${changed === 1 ? "" : "s"} changed in 24 h`);
+  if (sessions) parts.push(`${sessions} session${sessions === 1 ? "" : "s"}`);
+  const a = (p.recent ?? [])[0];
+  const name = a?.file.length > 44 ? `…${a.file.slice(-43)}` : a?.file;
+  return { meta: parts.join(" · ") || "No activity seen yet", last: a ? `${name} · ${ago(a.at)}` : "" };
+}
+
 export function detailHeight(b, p, ui, now) {
+  if (p.derived) { const n = areaFiles(p).length; return n ? n * 44 + n - 1 : 64; }
   const list = kids(b, p.id);
   const openRows = list.filter((t) => taskIsOpen(t, ui)).reduce((a, t) => a + 16 + Math.max(taskDetails(b, t, () => "").rows.length, 5) * 20, 0);
   const sessN = (b.runs ?? []).filter((r) => r.componentId === p.id).reduce((a, r) => a + (r.todos ?? []).length, 0)
@@ -51,6 +65,7 @@ export function boardLayout(b, ui, now) {
     if (depth[p.id] != null) return depth[p.id];
     if (visiting.has(p.id)) return 0;
     visiting.add(p.id);
+    if (p.col != null) return (depth[p.id] = p.col); // an inferred card has a place on a grid, and no edges to rank it
     const preds = p.needs.filter((id) => byId[id]);
     depth[p.id] = preds.length ? 1 + Math.max(...preds.map((id) => getDepth(byId[id]))) : 0;
     visiting.delete(p.id);

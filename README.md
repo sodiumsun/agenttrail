@@ -36,7 +36,7 @@ Watching does not change your repo. In an interactive terminal, starting without
 
 ## Draw the component map
 
-File activity and run cards work on their own. The component map needs a plan.
+File activity and run cards work on their own. With no plan, the map is inferred from your folders and agent activity: cards show recent files, agents and sessions, and lines show where a session moved. Add a plan for real tasks and progress.
 
 Run `npx agenttrail init`, review the setup, then give your agent the backfill prompt from the board. It adds the convention to `CLAUDE.md` and `AGENTS.md`, creates a starter plan, offers local Claude Code hooks, and adds `.agenttrail/` to `.gitignore`. **Setup writes these files; normal watching does not.** Noninteractive `init` assumes yes, so run it only when you intend to configure the repo.
 
