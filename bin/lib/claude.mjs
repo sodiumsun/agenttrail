@@ -126,7 +126,7 @@ export class ClaudeLogReader extends LogTailReader {
 
   rowEffects(row, meta, cursor) {
     // A session can move between folders: like a hook, each row counts only where it happened.
-    return typeof row?.cwd === 'string' && this.wants(row.cwd) ? claudeEffects(row, meta, cursor, this.rel) : []
+    return typeof row?.cwd === 'string' && this.wants(row.cwd) ? claudeEffects(row, meta, cursor, this.rel).map(e => ({ ...e, cwd: row.cwd })) : []
   }
 
   // The first rows hold no fixed header, so take the first that names a session.

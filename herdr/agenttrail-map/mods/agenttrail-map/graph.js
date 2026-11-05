@@ -12,7 +12,7 @@ const TRAIL_MS = 45 * 60e3;
 export const kids = (b, id) => b.plan.filter((n) => n.parent === id);
 export const touched = (p, now) => Boolean(p.touchedAt && now - p.touchedAt < LIVE_MS);
 export const compLive = (b, p, now) => p.status === "active" || touched(p, now) || (b.runs ?? []).some((r) => !r.ended && r.componentId === p.id);
-// An inferred card opens only when asked: a file write must not push the cards below it.
+// A card from git opens only when asked: a file write must not push the cards below it.
 export const isUnfolded = (b, p, ui, now) => !ui.closed.has(p.id) && (ui.open.has(p.id) || (!p.derived && compLive(b, p, now)));
 export const taskIsOpen = (task, ui) => ui.openTasks.has(task.id) || (!ui.closedTasks.has(task.id) && task.status === "active");
 
@@ -26,20 +26,31 @@ export function taskDetails(b, task, ago) {
   return { rows, live };
 }
 
-// What an inferred card says about itself. Observed activity only: it has no tasks to count.
-export const areaFiles = (p) => (p.recent ?? []).slice(0, 6);
-export function areaLines(p, ago) {
-  const { changed = 0, sessions = 0 } = p.stats ?? {};
-  const parts = [];
-  if (changed) parts.push(`${changed} file${changed === 1 ? "" : "s"} changed in 24 h`);
-  if (sessions) parts.push(`${sessions} session${sessions === 1 ? "" : "s"}`);
-  const a = (p.recent ?? [])[0];
-  const name = a?.file.length > 44 ? `…${a.file.slice(-43)}` : a?.file;
-  return { meta: parts.join(" · ") || "No activity seen yet", last: a ? `${name} · ${ago(a.at)}` : "" };
+// What a card drawn from git says. Subjects are shown as written, and it has no tasks to
+// count. A session working here takes the second line: it is the newest thing to know.
+const fitLine = (text, room) => (text.length > room ? `${text.slice(0, room - 1)}…` : text);
+export const cardCommits = (p) => (p.commits ?? []).slice(0, 6);
+export function cardLines(b, p, ago) {
+  const [a, c] = p.commits ?? [];
+  const r = (b.runs ?? []).filter((x) => x.componentId === p.id).sort((x, y) => Number(x.ended) - Number(y.ended) || y.lastEventAt - x.lastEventAt)[0];
+  const doing = (r?.todos ?? []).find((t) => t.status === "in_progress")?.content ?? r?.currentTool?.detail ?? "working";
+  const session = !r ? "" : r.ended ? `${r.agent} session, ${ago(r.lastEventAt)} ago` : `${r.agent}: ${doing}`;
+  return { first: fitLine(a?.s ?? "No commits in this window", 60), second: fitLine(session || c?.s || "", 62), working: Boolean(r && !r.ended), age: p.at ? `${ago(p.at)} ago` : "" };
+}
+
+// Map's honesty rule, with the count of what did not make it onto a card.
+export function inferredNote(b, narrow) {
+  const d = b.derived ?? {};
+  const span = d.days ? `last ${d.days} days` : "all history";
+  const what = d.mode === "streams"
+    ? `${d.shown} of ${d.active} active branches and worktrees shown, ${d.active - d.shown} left out`
+    : `${d.commits} commit${d.commits === 1 ? "" : "s"} on one branch`;
+  const quiet = d.mode === "streams" && d.quiet ? ` ${d.quiet} of ${d.worktrees} worktrees quiet.` : "";
+  return `Inferred from git, ${span}: ${what}.${narrow ? "" : `${quiet} A plan adds tasks and progress: npx agenttrail init`}`;
 }
 
 export function detailHeight(b, p, ui, now) {
-  if (p.derived) { const n = areaFiles(p).length; return n ? n * 44 + n - 1 : 64; }
+  if (p.derived) { const n = cardCommits(p).length; return n ? n * 44 + n - 1 : 64; }
   const list = kids(b, p.id);
   const openRows = list.filter((t) => taskIsOpen(t, ui)).reduce((a, t) => a + 16 + Math.max(taskDetails(b, t, () => "").rows.length, 5) * 20, 0);
   const sessN = (b.runs ?? []).filter((r) => r.componentId === p.id).reduce((a, r) => a + (r.todos ?? []).length, 0)
@@ -74,7 +85,8 @@ export function boardLayout(b, ui, now) {
   phases.forEach(getDepth);
   const cols = {};
   phases.forEach((p) => (cols[depth[p.id]] ??= []).push(p));
-  const gx = 120, gy = 48, pad = 64;
+  // Connectors from a git board need room to be followed, and it has more rows than a plan.
+  const gx = b.derived ? 280 : 120, gy = b.derived ? 24 : 48, pad = 64;
   const metrics = Object.fromEntries(phases.map((p) => [p.id, nodeMetrics(b, p, ui, now)]));
   const columnWidths = {};
   for (const [col, list] of Object.entries(cols)) columnWidths[col] = Math.max(...list.map((p) => metrics[p.id].w));
@@ -165,7 +177,7 @@ export function cardAgents(b, p) {
 export const statusLabel = (s) => (s === "done" ? "Complete" : s === "active" ? "In progress" : s === "blocked" ? "Blocked" : "Not started");
 export const ago = (ms, now) => {
   const s = Math.max(0, Math.round((now - ms) / 1000));
-  return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`;
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)} min` : s < 172800 ? `${Math.round(s / 3600)} h` : `${Math.round(s / 86400)} d`;
 };
 
 // The card a narrow view should open on: where a live run is pinned, then the freshest
@@ -177,6 +189,9 @@ export function liveCard(b, now) {
   const pinned = comps.filter((p) => (b.runs ?? []).some((r) => !r.ended && r.componentId === p.id));
   return (newest(pinned) ?? newest(comps.filter((p) => touched(p, now))) ?? comps.find((p) => p.status === "active"))?.id ?? null;
 }
+
+// Where a narrow view opens with nothing live: a graph of git history always has a newest card.
+export const openingCard = (b, now) => liveCard(b, now) ?? (b.derived ? b.plan.find((n) => n.level === "component")?.id ?? null : null);
 
 const sameProps = (a, c) => JSON.stringify(a ?? {}) === JSON.stringify(c ?? {});
 

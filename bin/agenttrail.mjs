@@ -13,7 +13,8 @@ import { hasMapRelay, repointRelays } from './lib/hooks.mjs'
 import { ClaudeLogReader, SUBAGENT_TOOL, subagentName, toolDetail as describeTool } from './lib/claude.mjs'
 import { CodexLogReader } from './lib/codex.mjs'
 import { panelFeed } from './lib/panel.mjs'
-import { IGNORE, TMP_FILE, areaId, areaNodes, coarseChange, ownerOf } from './lib/areas.mjs'
+import { IGNORE, TMP_FILE, areaId, ownerOf } from './lib/areas.mjs'
+import { boardNodes } from './lib/workstreams.mjs'
 import { Worker } from 'node:worker_threads'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -188,8 +189,8 @@ function parsePlan(text) {
 const session = { id: Math.random().toString(36).slice(2, 10), project: path.basename(repo), startedAt: new Date().toISOString() }
 let planText = safeRead(planPath)
 let parsed = parsePlan(planText)
-const inferring = () => planText.length === 0 // no plan: the map is built from the repo's folders
-let areaScan = null // { list, source, files, truncated, scannedAt, splitAt, settling }
+const inferring = () => planText.length === 0 // no plan: the map is built from git history
+let gitScan = null // what git-scan.mjs last read, plus { print, scannedAt, splitAt }
 let activity = null // { file, at } — most recent non-plan repo write
 let recentActivity = [] // last N writes, newest first — feeds the live-view drill-down
 let planMtime = statMtime(planPath)
@@ -202,11 +203,10 @@ const clients = new Set()
 const compTouched = {} // component id -> last matching write ts
 const compRecent = {} // component id -> [{file, at}] newest first — feeds capsule work lines
 const fileHeat = {} // file -> last touch ts, capped
-const fileRuns = {} // file -> sessions that wrote it, capped with fileHeat; only kept for a repo with no plan
 function heatFile(file, at) {
   fileHeat[file] = at
   const keys = Object.keys(fileHeat)
-  if (keys.length > 600) { keys.sort((a, b) => fileHeat[a] - fileHeat[b]); for (const k of keys.slice(0, 100)) { delete fileHeat[k]; delete fileRuns[k] } }
+  if (keys.length > 600) { keys.sort((a, b) => fileHeat[a] - fileHeat[b]); for (const k of keys.slice(0, 100)) delete fileHeat[k] }
 }
 function globToRe(g) {
   if (!/[*?]/.test(g)) return new RegExp('^' + g.replace(/[.+^${}()|[\]\\]/g, '\\$&') + '(/|$)')
@@ -215,18 +215,19 @@ function globToRe(g) {
 }
 let compMatchers = []
 function rebuildMatchers() {
-  if (inferring()) { compMatchers = parsed.nodes.map(n => ({ id: n.id, res: [{ test: f => ownerArea(f) === n.id }] })); return } // a file has one area, its deepest
+  if (inferring()) { compMatchers = parsed.nodes.filter(n => n.path != null).map(n => ({ id: n.id, res: [{ test: f => ownerArea(f) === n.id }] })); return } // a file has one area, its deepest
   compMatchers = parsed.nodes.filter(n => n.level === 'component' && n.files.length)
     .map(c => ({ id: c.id, res: c.files.map(globToRe) }))
 }
+function touchCard(id, file, at) {
+  compTouched[id] = Math.max(compTouched[id] || 0, at)
+  compRecent[id] = [{ file, at }, ...(compRecent[id] || []).filter(x => x.file !== file)].sort((a, b) => b.at - a.at).slice(0, 6)
+}
 function touchComponents(file, at) {
   for (const m of compMatchers) if (m.res.some(re => re.test(file))) {
+    if (inferring()) { touchCard(m.id, file, at); continue }
     compTouched[m.id] = Math.max(compTouched[m.id] || 0, at)
     const arr = compRecent[m.id] || (compRecent[m.id] = [])
-    if (inferring()) {
-      compRecent[m.id] = [{ file, at }, ...arr.filter(x => x.file !== file)].sort((a, b) => b.at - a.at).slice(0, 6)
-      continue
-    }
     if (arr[0] && arr[0].file === file) arr[0] = { file, at, n: (arr[0].n || 1) + 1 }
     else arr.unshift({ file, at, n: 1 })
     if (arr.length > 6) arr.length = 6
@@ -248,6 +249,7 @@ function commitTaskEffect(run, effect, at) {
 const toolDetail = input => describeTool(input, relToRepo)
 function relToRepo(p) {
   if (!p) return null
+  if (inferring()) return locate(p)?.rel ?? null
   const r = path.resolve(String(p))
   const root = repoRoots.find(x => r === x || r.startsWith(x + path.sep))
   return root === undefined ? null : r.slice(root.length + 1)
@@ -269,10 +271,9 @@ function noteRunFile(run, rel, at) {
   heatFile(rel, Math.max(fileHeat[rel] || 0, at))
   touchComponents(rel, at)
   if (!activity || at >= activity.at) activity = { file: rel, at }
-  if (inferring()) noteAreaWriter(run, rel, at)
   for (const m of compMatchers) if (m.res.some(re => re.test(rel))) {
     if (run.componentId !== m.id) {
-      (run.path = run.path || []).push({ c: m.id, at, ...(inferring() ? { f: rel } : {}) })
+      (run.path = run.path || []).push({ c: m.id, at })
       const prev = Object.values(runs).find(r2 => r2.id !== run.id && r2.ended && r2.componentId === m.id && at >= r2.lastEventAt && at - r2.lastEventAt < 10 * 60e3)
       if (prev) { handoffs.push({ c: m.id, from: prev.agent, to: run.agent, at }); if (handoffs.length > 10) handoffs.shift() }
     }
@@ -294,8 +295,9 @@ function wakeRun(run) {
 }
 function handleHookEvent(ev) {
   const cwd = ev.cwd || ''
-  if (!inRepo(cwd)) return false
+  if (!inScope(cwd)) return false
   const run = runFor(ev.session_id || 'session', cwd)
+  if (inferring()) noteRunPlace(run, cwd)
   if (ev.agent) run.agent = run.provider = String(ev.agent).slice(0, 24).toLowerCase()
   const terminalId = clean(ev.hc_terminal_id, 200)
   if (terminalId) run.terminalId = terminalId
@@ -328,8 +330,7 @@ function handleHookEvent(ev) {
     recordTool(run, { name: ev.tool_name, detail: toolDetail(ev.tool_input), at: Date.now(), ms: Date.now() - started, ...call })
     run.currentTool = null
     if (ev.status !== 'error' && ev.status !== 'failed') commitTaskEffect(run, claudeTaskEffect(ev.tool_name, ev.tool_input, ev.tool_response ?? ev.tool_output), Date.now())
-    const rel = relToRepo(ev.tool_input && (ev.tool_input.file_path || ev.tool_input.notebook_path))
-    if (rel) noteRunFile(run, rel, Date.now())
+    noteRunWrite(run, ev.tool_input && (ev.tool_input.file_path || ev.tool_input.notebook_path), Date.now())
   } else return false
   return true
 }
@@ -341,6 +342,7 @@ function applyLogEffect(run, meta, e) {
   run.lastEventAt = Math.max(run.lastEventAt, e.at)
   wakeRun(run)
   stateDirty = true
+  if (inferring() && e.cwd) noteRunPlace(run, e.cwd)
   if (e.kind === 'turn-start') { run.ended = false; run.interrupted = false; run.sessionEnded = false }
   else if (e.kind === 'turn-end' || e.kind === 'interrupted') { run.ended = true; run.interrupted = e.kind === 'interrupted'; run.currentTool = null }
   else if (e.kind === 'tool-start') { run.ended = false; run.currentTool = { name: e.name, detail: e.detail, at: e.at, callId: e.callId } }
@@ -353,10 +355,7 @@ function applyLogEffect(run, meta, e) {
   } else if (e.kind === 'tool-end') {
     if (run.currentTool && (e.callId ? run.currentTool.callId === e.callId || (!run.currentTool.callId && run.currentTool.name === e.name) : false)) run.currentTool = null
     if (e.record) recordTool(run, { name: e.name, detail: e.detail, at: e.at, ms: e.ms, ...(e.callId ? { callId: e.callId } : {}), ...(e.error ? { error: true } : {}) })
-    for (const file of e.files) {
-      const rel = relToRepo(path.resolve(meta.cwd, file))
-      if (rel) noteRunFile(run, rel, e.at)
-    }
+    for (const file of e.files) noteRunWrite(run, path.resolve(inferring() && e.cwd ? e.cwd : meta.cwd, file), e.at)
   }
 }
 // Codex has no hook here: its local log is the source.
@@ -440,8 +439,7 @@ function loadState() {
     Object.assign(compTouched, st.compTouched || {})
     Object.assign(compRecent, st.compRecent || {})
     Object.assign(fileHeat, st.fileHeat || {})
-    Object.assign(fileRuns, st.fileRuns || {})
-    areaScan = st.areaScan || null
+    gitScan = st.gitScan || null
     codexCursors = st.codexCursors || {}
     claudeCursors = st.claudeCursors || {}
   } catch {}
@@ -451,7 +449,7 @@ function saveState() {
   stateDirty = false
   try {
     fs.mkdirSync(path.dirname(stateFile), { recursive: true, mode: 0o700 })
-    fs.writeFileSync(stateFile, JSON.stringify({ repoPath: repo, port, activity, recentActivity, compTouched, compRecent, runs, fileHeat, cycles, codexCursors, claudeCursors, ...(inferring() ? { fileRuns, areaScan } : {}) }), { mode: 0o600 })
+    fs.writeFileSync(stateFile, JSON.stringify({ repoPath: repo, port, activity, recentActivity, compTouched, compRecent, runs, fileHeat, cycles, codexCursors, claudeCursors, ...(inferring() ? { gitScan } : {}) }), { mode: 0o600 })
     fs.chmodSync(stateFile, 0o600) // it holds the start of commands, and earlier versions left it readable
   } catch {}
 }
@@ -493,21 +491,21 @@ let treeDirty = false
 let lastTreeSent = Date.now()
 rebuildMatchers()
 
-// ---------- inferred areas: the map of a repo with no plan ----------
-// Areas go in where a plan's components go, so the live layer pins work to them with the
-// same code. The list comes off a worker, and only on the coarse rule below does it change:
-// a poll reads what is held here, and a file write only marks the list as due a look.
-const AREA_QUIET_MS = 5 * 60e3 // a listing runs at most this often while files change
-const AREA_EMPTY_MS = 3000 // a repo with no cards yet is worth looking at again soon
-const AREA_SETTLE_MS = 15000 // logs replay after the first listing, so look once more with that work known
-const AREA_RESPLIT_MS = 30 * 60e3 // cards can move no more often than this
-const AREA_HOT_MS = 14 * 86400e3
-const AREA_CHANGED_MS = 86400e3
-const AGENT_HEAT = 3 // a write an agent made counts over one the watcher only saw
-let areaTimer = null
-let areaRunning = false
+// ---------- git history: the map of a repo with no plan ----------
+// Workstreams and code areas go in where a plan's components go. Git is polled on a coarse
+// interval from a worker, so this leans on no file events and watches no worktree: a look
+// that finds the same refs and worktrees costs two small git commands and changes nothing.
+const GIT_POLL_MS = parseInt(process.env.AGENTTRAIL_GIT_POLL_MS, 10) || 30000
+const GIT_REFRESH_MS = 5 * 60e3 // windows age and worktrees get dirty with no ref moving
+const CARD_MOVE_MS = 30 * 60e3 // cards can change places no more often than this
+const IGNORED_MS = 10 * 60e3
+const SCAN_SOON_MS = 3000 // a session just turned up somewhere with no card
+let gitRunning = false
+let gitSoon = null
+let ignoredAt = 0
 let areaIgnored = new Set()
 let areaOwners = new Map()
+let worktreeHomes = new Set()
 
 function folderPrefixed(p) {
   const inside = p + '/'
@@ -519,113 +517,107 @@ function isIgnoredPath(f) {
   return false
 }
 const ownerArea = file => ownerOf(areaOwners, file)
-function useAreas() {
-  const list = areaScan?.list || []
-  parsed.nodes = areaNodes(list)
-  areaOwners = new Map(list.map(a => [a.path, areaId(a.path)]))
-  rebuildMatchers()
-}
 function noteRecent(entry) {
   recentActivity = [entry, ...recentActivity.filter(a => a.file !== entry.file)].slice(0, 12)
 }
-function noteAreaWriter(run, rel, at) {
-  run.areaFile = rel
-  if (!recentActivity.some(a => a.file === rel && a.at >= at)) noteRecent({ file: rel, at })
-  const list = fileRuns[rel] || (fileRuns[rel] = [])
-  const id = String(run.id).slice(0, 12)
-  if (!list.includes(id) && list.length < 8) list.push(id)
-}
-// Activity is kept per card, so new cards take it over from the files it came from.
-function rehomeActivity() {
-  for (const key of Object.keys(compTouched)) delete compTouched[key]
-  for (const key of Object.keys(compRecent)) delete compRecent[key]
-  for (const f of Object.keys(fileHeat)) if (isFolder(f)) delete fileHeat[f]
-  for (const [file, at] of Object.entries(fileHeat).sort((a, b) => b[1] - a[1])) {
-    const id = ownerArea(file)
-    if (!id) continue
-    compTouched[id] = Math.max(compTouched[id] || 0, at)
-    const list = compRecent[id] || (compRecent[id] = [])
-    if (list.length < 6) list.push({ file, at })
-  }
-  for (const r of Object.values(runs)) {
-    const stops = (r.path || []).map(s => ({ ...s, c: s.f ? ownerArea(s.f) : null })).filter(s => s.c)
-    r.path = stops.filter((s, i) => i === 0 || s.c !== stops[i - 1].c)
-    r.componentId = r.areaFile ? ownerArea(r.areaFile) : null
+// The deepest worktree holding a path. Worktrees can sit anywhere, so a walk up the path
+// answers in a few steps however many a repo has.
+function locate(p) {
+  const r = path.resolve(String(p))
+  const trees = gitScan?.worktrees || {}
+  for (let at = r; ; at = path.dirname(at)) {
+    if (at in trees || repoRoots.includes(at)) return { root: at, rel: r.slice(at.length + 1), card: trees[at] ?? null }
+    if (at === path.dirname(at)) return null
   }
 }
-function dropAreas() {
-  const isArea = id => String(id).startsWith('area-')
-  for (const key of Object.keys(compTouched)) if (isArea(key)) delete compTouched[key]
-  for (const key of Object.keys(compRecent)) if (isArea(key)) delete compRecent[key]
+// With no plan a session anywhere in the repo's worktrees counts, and so does one in a folder
+// that holds several of them: it works in them by path. With a plan: only the repo.
+const inScope = p => inRepo(p) || (inferring() && Boolean(p) && (Boolean(locate(p)) || worktreeHomes.has(path.resolve(p))))
+const cardShown = id => parsed.nodes.some(n => n.id === id)
+function pinRun(run) {
+  const spot = locate(run.place || run.cwd || '')
+  const id = spot?.card
+  run.componentId = id && cardShown(id) ? id : run.areaCard && cardShown(run.areaCard) ? run.areaCard : null
+  if (!run.ended && spot && gitScan?.mode === 'streams' && !run.componentId) scanSoon()
+}
+// Stepping back out of a worktree leaves a session where it last was.
+function noteRunPlace(run, cwd) {
+  if (run.place === cwd || !locate(cwd)) return
+  run.place = cwd
+  pinRun(run)
+}
+function noteRunWrite(run, file, at) {
+  if (!file) return
+  if (!inferring()) { const rel = relToRepo(file); if (rel) noteRunFile(run, rel, at); return }
+  const spot = locate(file)
+  if (!spot?.rel) return
+  heatFile(spot.rel, Math.max(fileHeat[spot.rel] || 0, at))
+  touchComponents(spot.rel, at)
+  if (spot.card) touchCard(spot.card, spot.rel, at)
+  if (!activity || at >= activity.at) activity = { file: spot.rel, at }
+  if (!recentActivity.some(a => a.file === spot.rel && a.at >= at)) noteRecent({ file: spot.rel, at })
+  run.areaCard = ownerArea(spot.rel)
+  noteRunPlace(run, spot.root)
+  pinRun(run)
+}
+function useGit() {
+  parsed.nodes = boardNodes(gitScan)
+  areaOwners = new Map((gitScan?.areas || []).map(a => [a.path, areaId(a.path)]))
+  rebuildMatchers()
+  const homes = {}
+  for (const root of Object.keys(gitScan?.worktrees || {})) homes[path.dirname(root)] = (homes[path.dirname(root)] || 0) + 1
+  worktreeHomes = new Set(Object.keys(homes).filter(p => homes[p] > 1))
+  for (const r of Object.values(runs)) pinRun(r)
+}
+function dropGit() {
+  const ours = id => /^(area|ws)-/.test(String(id))
+  for (const key of Object.keys(compTouched)) if (ours(key)) delete compTouched[key]
+  for (const key of Object.keys(compRecent)) if (ours(key)) delete compRecent[key]
   for (const r of Object.values(runs)) {
-    if (r.path) r.path = r.path.filter(s => !isArea(s.c))
-    if (isArea(r.componentId)) r.componentId = null
+    if (ours(r.componentId)) r.componentId = null
+    delete r.place
+    delete r.areaCard
   }
-  areaScan = null
+  gitScan = null
   areaOwners = new Map()
-  clearTimeout(areaTimer)
-  areaTimer = null
   stateDirty = true
 }
-function listRepo() {
-  const heat = {}
-  const since = Date.now() - AREA_HOT_MS
-  for (const [file, at] of Object.entries(fileHeat)) if (at >= since) heat[file] = fileRuns[file] ? AGENT_HEAT : 1
-  const current = (areaScan?.list || []).map(a => a.path)
+function readGit(full) {
+  const now = Date.now()
+  const moved = !gitScan?.splitAt || now - gitScan.splitAt >= CARD_MOVE_MS
+  const keep = moved ? null : { areas: (gitScan.areas || []).map(a => a.path), order: (gitScan.streams || []).map(s => s.key) }
+  const live = [...new Set(Object.values(runs).filter(r => !r.ended).map(r => locate(r.place || r.cwd || '')?.root).filter(Boolean))].sort()
+  const ignoredDue = now - ignoredAt >= IGNORED_MS
   return new Promise(resolve => {
-    const worker = new Worker(new URL('./lib/areas-scan.mjs', import.meta.url), { workerData: { repo, heat, current } })
+    const worker = new Worker(new URL('./lib/git-scan.mjs', import.meta.url), { workerData: { repo, live, keep, ignoredDue, print: full || moved || ignoredDue ? null : gitScan?.print ?? null } })
     worker.unref()
-    worker.once('message', resolve)
-    worker.once('error', () => resolve(null))
-    worker.once('exit', () => resolve(null))
+    worker.once('message', seen => resolve({ seen, moved }))
+    worker.once('error', () => resolve({}))
+    worker.once('exit', () => resolve({}))
   })
 }
-async function scanAreas() {
-  if (areaRunning) return
-  areaRunning = true
-  const seen = await listRepo()
-  areaRunning = false
-  if (!seen || !inferring()) return
+async function scanGit() {
+  if (gitRunning || !inferring()) return
+  gitRunning = true
+  const full = !gitScan?.scannedAt || Date.now() - gitScan.scannedAt >= GIT_REFRESH_MS
+  const { seen, moved } = await readGit(full)
+  gitRunning = false
+  if (!seen || seen.failed || seen.same || !inferring()) return
+  if (seen.ignored) { areaIgnored = new Set(seen.ignored); ignoredAt = Date.now() }
   const now = Date.now()
-  const next = { list: seen.next, files: seen.files }
-  areaIgnored = new Set(seen.ignored)
-  const first = !areaScan?.list.length
-  const settling = areaScan?.settling && now >= areaScan.scannedAt + AREA_SETTLE_MS
-  const moved = first || (settling ? seen.next.some(a => !areaScan.list.some(x => x.path === a.path)) : now >= areaScan.splitAt + AREA_RESPLIT_MS && coarseChange(areaScan, next))
-  const keep = !first && !moved
-  const counted = new Map(seen.current.map(a => [a.path, a]))
-  areaScan = {
-    list: keep ? areaScan.list.map(a => counted.get(a.path) ?? { ...a, count: 0, sample: [] }) : seen.next, // kept cards keep their places
-    source: seen.source, files: seen.files, truncated: seen.truncated, scannedAt: now,
-    splitAt: keep ? areaScan.splitAt : now,
-    settling: first && seen.next.length > 0,
-  }
-  useAreas()
-  if (moved) rehomeActivity()
+  gitScan = seen.mode ? { ...seen, ignored: undefined, scannedAt: now, splitAt: moved ? now : gitScan?.splitAt ?? now } : { git: Boolean(seen.git), print: seen.print ?? null, scannedAt: now }
+  useGit()
   stateDirty = true
   broadcast()
-  if (areaScan.settling) areaDue(AREA_SETTLE_MS)
 }
-function areaDue(wait) {
-  if (areaTimer || !inferring()) return
-  areaTimer = setTimeout(() => { areaTimer = null; scanAreas() }, wait)
-  areaTimer.unref()
+function scanSoon() {
+  if (gitSoon) return
+  gitSoon = setTimeout(() => { gitSoon = null; scanGit() }, SCAN_SOON_MS)
+  gitSoon.unref()
 }
-function areaStats() {
-  const stats = {}, sessions = {}
-  for (const a of areaScan?.list || []) { const id = areaId(a.path); stats[id] = { changed: 0, sessions: 0 }; sessions[id] = new Set() }
-  const since = Date.now() - AREA_CHANGED_MS
-  for (const [file, at] of Object.entries(fileHeat)) {
-    const id = ownerArea(file)
-    if (!id || !stats[id]) continue
-    if (at >= since) stats[id].changed += 1
-    for (const r of fileRuns[file] || []) sessions[id].add(r)
-  }
-  for (const id of Object.keys(stats)) stats[id].sessions = sessions[id].size
-  return stats
-}
-if (inferring()) useAreas()
-const firstAreaScan = inferring() ? scanAreas() : null
+if (inferring()) useGit()
+const firstGitScan = inferring() ? scanGit() : null
+setInterval(scanGit, GIT_POLL_MS).unref()
 
 function safeRead(p) { try { return fs.readFileSync(p, 'utf8') } catch { return '' } }
 function statMtime(p) { try { return fs.statSync(p).mtimeMs } catch { return null } }
@@ -641,14 +633,14 @@ function readPlan() {
   planText = safeRead(planPath)
   parsed = parsePlan(planText)
   planMtime = statMtime(planPath)
-  if (inferring()) { useAreas(); if (!areaScan) areaDue(0) }
-  else { if (was) dropAreas(); rebuildMatchers() }
+  if (inferring()) { useGit(); if (!gitScan) scanGit() }
+  else { if (was) dropGit(); rebuildMatchers() }
 }
 
 function compFilesFor(id) {
   if (inferring()) {
-    const area = (areaScan?.list || []).find(a => areaId(a.path) === id)
-    return [...new Set([...(compRecent[id] || []).map(x => x.file), ...(area?.sample || [])])].slice(0, 24)
+    const node = parsed.nodes.find(n => n.id === id)
+    return [...new Set([...(compRecent[id] || []).map(x => x.file), ...(node?.sample || [])])].slice(0, 24)
   }
   const m = compMatchers.find(x => x.id === id)
   if (!m) return []
@@ -696,17 +688,16 @@ function planStaleness() {
 }
 function model({ lite = false } = {}) {
   if (treeDirty && !(lite && inferring())) { tree = buildTree(repo); treeDirty = false } // inferred cards never read the tree, so a poll need not walk it
-  const stats = inferring() ? areaStats() : null
   return {
     boards, port,
     runs: liveRuns(),
-    session, plan: parsed.nodes.map(n => n.level === 'component' ? { ...n, touchedAt: compTouched[n.id] || null, recent: compRecent[n.id] || [], filesList: compFilesFor(n.id), ...(stats ? { stats: stats[n.id] } : {}) } : n), tree,
+    session, plan: parsed.nodes.map(n => n.level === 'component' ? { ...n, touchedAt: compTouched[n.id] || null, recent: compRecent[n.id] || [], filesList: compFilesFor(n.id) } : n), tree,
     planTitle: parsed.title,
     hasPlan: planText.length > 0, treeTruncated,
     activity, recentActivity, planMtime, handoffs, hotFiles: hotFiles(), cycles,
     planStale: planStaleness(), lints: lintPlan(), hooksInstalled: hooksInstalled(),
     now: Date.now(),
-    ...(inferring() ? { derived: { from: 'folders and activity', source: areaScan?.source ?? null, files: areaScan?.files ?? 0, truncated: Boolean(areaScan?.truncated), scannedAt: areaScan?.scannedAt ?? null } } : {}),
+    ...(inferring() ? { derived: { from: 'git history', git: gitScan?.git ?? null, mode: gitScan?.mode ?? null, days: gitScan?.days ?? null, scannedAt: gitScan?.scannedAt ?? null, ...gitScan?.counts } } : {}),
   }
 }
 
@@ -717,7 +708,7 @@ function send(obj) {
 function broadcast() { send(model()) }
 // activity ticks carry only what moved — the 600KB tree stays home
 function broadcastTick() {
-  send({ partial: true, runs: liveRuns(), activity, recentActivity, touched: { ...compTouched }, compRecent, handoffs, hotFiles: hotFiles(), now: Date.now(), ...(inferring() ? { areaStats: areaStats() } : {}) })
+  send({ partial: true, runs: liveRuns(), activity, recentActivity, touched: { ...compTouched }, compRecent, handoffs, hotFiles: hotFiles(), now: Date.now() })
 }
 
 // ---------- watcher ----------
@@ -732,12 +723,11 @@ try {
       planDebounce = setTimeout(() => { readPlan(); broadcast() }, 150)
       return
     }
-    if (inferring() && isIgnoredPath(f)) return // a build folder is not work on this repo
+    if (inferring() && (isIgnoredPath(f) || !repoRoots.includes(locate(path.join(repo, f))?.root))) return // a build folder is not work on this repo, and a worktree inside it speaks through its sessions
     // plain repo churn → liveness signal
     treeDirty = true
     stateDirty = true
     const folder = isFolder(f)
-    if (inferring()) areaDue(areaScan?.list.length ? AREA_QUIET_MS : AREA_EMPTY_MS)
     if (!(folder && inferring())) {
       activity = { file: f, at: Date.now() }
       heatFile(f, activity.at)
@@ -1022,13 +1012,13 @@ const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
 const claudeHome = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude')
 const codexLogs = new CodexLogReader({
   codexHome,
-  wants: inRepo,
+  wants: inScope,
   cursors: codexCursors,
   apply: (meta, effects) => { for (const e of effects) applyCodexEffect(meta, e) },
 })
 const claudeLogs = new ClaudeLogReader({
   claudeHome,
-  wants: inRepo,
+  wants: inScope,
   rel: relToRepo,
   cursors: claudeCursors,
   apply: (meta, effects) => { for (const e of effects) applyClaudeEffect(meta, e) },
@@ -1068,8 +1058,8 @@ function startLogs() {
 }
 function onListen() {
   publishActionToken()
-  // A log is read once, so its work must land on cards: with no plan they come first.
-  if (firstAreaScan) Promise.race([firstAreaScan, new Promise(r => setTimeout(r, 3000))]).then(startLogs)
+  // A log is read once, and worktrees decide which logs are ours: with no plan they come first.
+  if (firstGitScan) Promise.race([firstGitScan, new Promise(r => setTimeout(r, 3000))]).then(startLogs)
   else startLogs()
   console.log(`agenttrail · ${session.project} · http://localhost:${port}`)
   if (!planText) console.log('no PLAN.md found — run `agenttrail init` in the repo to scaffold one')
