@@ -1,12 +1,12 @@
-// The Map prototype mod. Its layout is a port of the page's, so these run the page's
+// The Map mod. Its layout is a port of the page's, so these run the page's
 // own functions next to the port, on this repo's real plan read through a real Map.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { Feed, SCAN_MS, focusFolder, pickMap } from '../herdr/agenttrail-map/mods/agenttrail-map/feed.js'
-import { boardEdges, boardLayout, cardAgents, dockedIn, hostOf, liveCard } from '../herdr/agenttrail-map/mods/agenttrail-map/graph.js'
+import { Feed, SCAN_MS, focusFolder, pickMap } from '../herdr/agenttrail/mods/agenttrail/feed.js'
+import { boardEdges, boardLayout, cardAgents, dockedIn, hostOf, liveCard } from '../herdr/agenttrail/mods/agenttrail/graph.js'
 import { freePortBase, startMap, stopAll, tempWorld } from './helpers.mjs'
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -33,7 +33,7 @@ const ui = (open = [], closed = []) => ({ open: new Set(open), closed: new Set(c
 const live = (plan) => plan.map((n) => (n.id === 'map' ? { ...n, touchedAt: NOW - 5000, recent: [{ file: 'public/index.html', n: 3, at: NOW - 5000 }] } : n))
 const curve = (c) => `M${c.x1} ${c.y1}C${c.ax} ${c.ay} ${c.bx} ${c.by} ${c.x2} ${c.y2}`
 
-describe('the Map prototype mod', () => {
+describe('the Map mod', () => {
   let world, map, board
   before(async () => {
     world = tempWorld(fs.readFileSync(path.join(ROOT, 'PLAN.md'), 'utf8'))
@@ -311,7 +311,7 @@ describe('the Map prototype mod', () => {
   })
 
   describe('where a copy lives', () => {
-    const mod = 'agenttrail-map'
+    const mod = 'agenttrail'
     const dock = { type: 'row', children: [{ content: { tab: 'active' } }, { id: 'dock', content: { mod } }] }
     const map = (pane, tab, zoomed = false) => ({ pane, tab, mod, zoomed })
     const shell = (pane, tab) => ({ pane, tab, terminal: 't1' })
@@ -347,8 +347,27 @@ describe('the Map prototype mod', () => {
     })
   })
 
+  test('the listing folder holds the mod, its recipe and preview, and no layout', () => {
+    const dir = path.join(ROOT, 'herdr', 'agenttrail')
+    assert.deepEqual(fs.readdirSync(dir).sort(), ['RECIPE.md', 'mods', 'preview.png'])
+    assert.deepEqual(fs.readdirSync(path.join(dir, 'mods')), ['agenttrail'])
+    const text = fs.readFileSync(path.join(dir, 'mods', 'agenttrail', 'main.js'), 'utf8')
+    assert.match(text, /^const MOD = "agenttrail";$/m)
+    for (const [, art] of text.matchAll(/\$\{ASSET\}\/([\w-]+\.svg)/g)) assert.ok(fs.existsSync(path.join(dir, 'mods', 'agenttrail', art)), art)
+  })
+
+  test('the pure modules import nothing from Herdr', () => {
+    const dir = path.join(ROOT, 'herdr', 'agenttrail', 'mods', 'agenttrail')
+    for (const file of ['feed.js', 'graph.js']) assert.ok(!/from "(herdr|gpui)/.test(fs.readFileSync(path.join(dir, file), 'utf8')), file)
+  })
+
+  test('no timer redraws: the clock only moves with the poll', () => {
+    const dir = path.join(ROOT, 'herdr', 'agenttrail', 'mods', 'agenttrail')
+    for (const file of ['main.js', 'feed.js', 'graph.js']) assert.ok(!/setTimeout|setInterval|timer\.every/.test(fs.readFileSync(path.join(dir, file), 'utf8')), file)
+  })
+
   test('the mod never writes to Map', () => {
-    const dir = path.join(ROOT, 'herdr', 'agenttrail-map', 'mods', 'agenttrail-map')
+    const dir = path.join(ROOT, 'herdr', 'agenttrail', 'mods', 'agenttrail')
     for (const file of ['main.js', 'feed.js', 'graph.js']) {
       const text = fs.readFileSync(path.join(dir, file), 'utf8')
       assert.ok(!/method:\s*["']POST/.test(text), file)
@@ -357,7 +376,7 @@ describe('the Map prototype mod', () => {
   })
 
   test('the only command the mod sends that starts anything is the Map terminal', () => {
-    const text = fs.readFileSync(path.join(ROOT, 'herdr', 'agenttrail-map', 'mods', 'agenttrail-map', 'main.js'), 'utf8')
+    const text = fs.readFileSync(path.join(ROOT, 'herdr', 'agenttrail', 'mods', 'agenttrail', 'main.js'), 'utf8')
     assert.deepEqual([...new Set(text.match(/\brun\("[a-z.]+"/g))].sort(), ['run("pane.zoom"', 'run("tab.close"', 'run("tab.new"', 'run("tab.select"', 'run("terminal.open"'])
     assert.match(text, /START_COMMAND = \["npx", "-y", "agenttrail@latest"\]/)
     assert.match(text, /\[\.\.\.this\.command, repo, "--no-open"\]/)

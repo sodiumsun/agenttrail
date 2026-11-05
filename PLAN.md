@@ -174,7 +174,7 @@ files: [bin/**, public/**, test/**, herdr/**, .github/workflows/map.yml]
 - [x] Show each agent's trail beside its terminal in Herdr {#herdr-panel}
   by: claude
   from: agent
-  tech: herdr/agenttrail/mods/agenttrail; pure link.js, view.js, feed.js with test/herdr-panel.test.mjs; seen rendering in a separate Herdr instance
+  tech: since replaced by the Map mod {#herdr-map-mod}; seen rendering in a separate Herdr instance
 - [x] Write the Herdr recipe, preview and install notes {#herdr-recipe}
   by: claude
   from: agent
@@ -182,9 +182,12 @@ files: [bin/**, public/**, test/**, herdr/**, .github/workflows/map.yml]
 - [x] Fix what an independent review of the branch found {#runs-review-fixes}
   by: claude
   tech: test/regressions.test.mjs
-- [ ] List the panel on herdr.dev once its Map is on npm {#herdr-list}
+- [x] Replace the Herdr panel with the Map itself {#herdr-map-mod}
+  by: claude
+  tech: herdr/agenttrail/mods/agenttrail; pure feed.js, graph.js with test/herdr-map.test.mjs; RECIPE.md and preview.png rewritten for it
+- [ ] List the Map mod on herdr.dev once its Map is on npm {#herdr-list}
   from: agent
-  tech: publish a Map with /panel first; then main-branch merge and the herdr-mod repo topic; owner's call
+  tech: publish 0.4.0 first; then main-branch merge and the herdr-mod repo topic; owner's call
 
 ## See the whole fleet {#fleet}
 tech: /summary + /fleet aggregation; zoom-out altitude with live repo cards
@@ -288,3 +291,4 @@ files: [README.md, docs/**, package.json, CONTRIBUTING.md, .github/**]
 - 2026-11-04: a native task change commits only on a recognised success acknowledgement. Failed, unknown or interrupted results keep the last confirmed list. A task update with no known title is dropped rather than shown under an invented name
 - 2026-11-04: Codex reading is bounded to the last 2 MiB per file (real logs reach 1 GB), limited to files touched in the last 2 hours (the same window a Map run lives), and its cursors are saved in the same state file as the runs so a restart cannot replay events twice. A run's evidence field says which of its facts are reported, observed, inferred or unknown
 - 2026-11-04: the Herdr panel is tasks under Watch live runs, not a new component. It passes three parts of the convention's test (it changes what the product does, a second task is plain in remote machines, it owns herdr/**) but fails the first: nothing depends on it yet and it is unpublished. Promote it to a card if work keeps clustering in herdr/**. The panel reads only GET /panel, a versioned feed, so it never depends on Map's internal run shape. A run links to a terminal by terminal id first, then by repo only when exactly one local agent and one live run match; otherwise the row stays unlinked
+- 2026-11-05: the native Map replaces the list panel in herdr/agenttrail, under the mod name agenttrail. One mod is simpler to list and install, and it shows what the panel only summarised. Map keeps GET /panel: the mod uses it to find Maps. The panel's row-to-terminal linking goes with it. Still tasks under Watch live runs, not a new component

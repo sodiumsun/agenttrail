@@ -1,4 +1,4 @@
-// The feed the Herdr panel reads (GET /panel). A stable, versioned shape, so the
+// A small summary of this Map (GET /panel), which the Herdr mod reads to find it. A stable, versioned shape, so the
 // mod never depends on how Map keeps a run internally. Raise PANEL_SCHEMA for any
 // change a schema-1 reader could misread; adding a field is not one.
 export const PANEL_SCHEMA = 1

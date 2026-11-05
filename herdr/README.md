@@ -1,10 +1,10 @@
 # Agenttrail for Herdr
 
-A [Herdr](https://herdr.dev) mod: a panel beside your agents showing which part of the project each one touched. Each row has the agent, its current task, its recent path through the project and its status, with each claim labelled reported, observed or inferred. Click a row to jump to that agent's terminal.
+A [Herdr](https://herdr.dev) mod: Agenttrail Map, drawn natively beside your agents. It shows the project as cards with connectors, each card's tasks and progress, and which card an agent is on right now. It opens as a panel on the right, expands to full size, and follows the repo of the focused terminal.
 
 ![Agenttrail for Herdr](agenttrail/preview.png)
 
-The picture is the real panel reading a real Map, with stand-in agents in a sample repo.
+The picture is the real mod reading a real Map on this repository's own `PLAN.md`.
 
 [`agenttrail/`](agenttrail/) is the shareable folder: `mods/agenttrail/`, the [`RECIPE.md`](agenttrail/RECIPE.md) another agent can build it from, and `preview.png`.
 
@@ -24,10 +24,9 @@ herdr-app do pane.split --direction right --mod agenttrail
 
 ## Use
 
-- Run Map in a repo (`npx agenttrail`), or press **Start Map here** in the panel. It finds every Map on this computer.
-- It needs a Map with the `/panel` feed; an older one shows a note.
-- Click a row to jump to its terminal. A row the panel can't tie to one terminal says so and does nothing: it never guesses between two agents in a repo.
-- **Open full map** opens Map in the browser.
-- **Show sample** shows made-up data, clearly marked, when nothing is running.
+- Run Map in a repo (`npx agenttrail`), or press **Start Map here** in the mod. The view follows the repo of the focused terminal and finds that repo's Map by itself.
+- The graph comes from the repo's `PLAN.md`. With no plan it falls back to a simple view of branches and worktrees from git, labelled as inferred. That needs Map 0.4.0 or later.
+- Click a card to open its tasks. Drag or scroll to pan, and hold cmd or ctrl while scrolling to zoom.
+- The header button expands the panel to full size and collapses it again.
 
-The panel is read-only. It talks only to Map on `127.0.0.1`, ports 5330 to 5344, and the only things it starts are a browser tab and, when asked, a Map terminal. It reads this computer only; agents on other machines are counted, not shown.
+The mod is read-only. It talks only to Map on `127.0.0.1`, ports 5330 to 5344, and the only thing it starts is a Map terminal, when asked. It reads this computer only.

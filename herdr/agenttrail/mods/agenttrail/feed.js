@@ -1,111 +1,144 @@
-// Finds Maps on this machine and keeps their /panel feeds. No Herdr imports: the
-// host passes fetch, sleep and now in, so node tests drive it with a fake clock.
+// Finds the Map for the repo of the focused terminal and keeps its /board-lite model, the
+// same one the page's world view reads. No Herdr imports: the host passes fetch, sleep and
+// the repo lookup in. Never shows a Map that isn't this repo's unless someone picks it.
 
 export const PORT_BASE = 5330;
 export const PORT_COUNT = 15;
 export const POLL_MS = 3000;
-export const MAX_DELAY_MS = 30000;
-export const SCAN_EVERY = 5; // rounds between looks at the ports no Map is on
-export const MISSES_TO_DROP = 2;
-export const SCHEMA = 1;
-// Herdr runs fetches nearly one at a time, about 250 ms each, so a 15-port scan needs
-// this long. Too short, and a Map on a late port is missed or counted as gone.
-export const TIMEOUT_MS = 4000;
+export const SCAN_MS = 15000; // while no Map matches: a scan is 15 fetches, and Herdr runs them nearly one at a time
+const TIMEOUT_MS = 4000; // Herdr's fetch is nearly serial and has no timeout of its own
+const MISSES_TO_DROP = 2; // one slow answer is not a stopped Map
 
-export const portsFrom = (base) => Array.from({ length: PORT_COUNT }, (_, i) => base + i);
-export const delayAfter = (failures) => Math.min(POLL_MS * 2 ** Math.max(0, failures), MAX_DELAY_MS);
+export const norm = (p) => String(p ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+const inside = (p, root) => p === root || p.startsWith(`${root}/`);
+export const repoName = (p) => norm(p).split("/").pop() || String(p ?? "");
+
+// The folder Map should follow: the focused terminal's, on this computer. Focus anywhere
+// else (this view, another mod, a terminal on another machine) keeps the last one.
+export function focusFolder(focus, spaces, last = null) {
+  if (!focus?.terminal || !focus.cwd) return last;
+  return spaces.find((s) => s.id === focus.space)?.machine ? last : norm(focus.cwd);
+}
+
+// The Map watching this folder: the deepest one, and never one outside the repo, so a
+// Map on a parent folder does not stand in for a repo nested inside it. Git gives the real
+// path and a terminal may have got there through a symlink, so then the root is the spot.
+export function pickMap(maps, folder, root) {
+  if (!folder) return null;
+  const spot = root && !inside(folder, root) ? root : folder;
+  const roots = maps.filter((m) => !root || inside(norm(m.repoPath), root));
+  return roots.filter((m) => inside(spot, norm(m.repoPath))).sort((a, b) => norm(b.repoPath).length - norm(a.repoPath).length)[0] ?? null;
+}
 
 async function getJson(fetch, url) {
   const res = await fetch(url);
-  if (!res.ok) return { status: res.status, body: null };
-  return { status: res.status, body: await res.json() };
+  return res.ok ? res.json() : null;
 }
 
-// One Map's feed, or null when nothing of ours is there. A Map from before the
-// feed still answers /whoami, so the panel can say so instead of showing nothing.
-export async function readBoard(fetch, port) {
-  const base = `http://127.0.0.1:${port}`;
-  try {
-    const { status, body } = await getJson(fetch, `${base}/panel`);
-    if (body?.app === "agenttrail") {
-      if (body.schema === SCHEMA) return { ...body, port };
-      return { port, project: body.project, repoPath: body.repoPath, url: body.url, tooNew: true, runs: [] };
-    }
-    if (status !== 404) return null;
-    const who = (await getJson(fetch, `${base}/whoami`)).body;
-    if (!who?.repoPath || !who?.project) return null;
-    return { port, project: who.project, repoPath: who.repoPath, url: `http://localhost:${port}`, tooOld: true, runs: [] };
-  } catch {
-    return null;
-  }
-}
-
-const withoutClock = (board) => ({ ...board, now: 0 });
-
-export class Poller {
-  constructor({ fetch, sleep, now, base = PORT_BASE, changed = () => {} }) {
-    Object.assign(this, { fetch, sleep, now, changed });
-    this.ports = portsFrom(base);
-    this.boards = new Map(); // port -> feed
-    this.misses = new Map();
-    this.failures = 0;
-    this.rounds = 0;
-    this.scanned = false;
-    this.next = 0;
+// state.kind: scanning, first look | map, board is set | off, no Map for this repo
+//   plain, folder is not in a repo | none, no terminal seen yet | gone, pinned Map not answering
+export class Feed {
+  constructor({ fetch, sleep, root = async () => null, folder = () => null, base = PORT_BASE, port = null, now = Date.now, eager = () => false }) {
+    Object.assign(this, { fetch, sleep, root, folder, base, now, eager });
+    this.fixed = port;
+    this.port = null;
+    this.board = null;
+    this.state = { kind: "scanning", repo: null, port: null, others: [], away: null };
     this.sig = "";
-    this.waiting = new Set(); // ports with a fetch still unanswered
+    this.maps = [];
+    this.roots = new Map(); // folder -> repo root; a miss is asked again, git init is cheap to notice
+    this.open = new Set(); // urls with a fetch still unanswered
+    this.place = undefined;
+    this.at = undefined;
+    this.chosen = null; // a Map picked by hand, until focus moves to another repo
+    this.misses = 0;
+    this.scannedAt = -Infinity;
   }
 
-  list() {
-    return [...this.boards.values()].sort((a, b) => String(a.project).localeCompare(String(b.project)) || a.port - b.port);
+  bounded(work) {
+    return Promise.race([work, this.sleep(TIMEOUT_MS).then(() => null)]);
   }
 
-  // A fetch that never answers must not stall the round, and Herdr's fetch has no
-  // timeout, so it stays open: never send another behind it. It counts as a miss.
-  read(port) {
-    if (this.waiting.has(port)) return Promise.resolve(null);
-    this.waiting.add(port);
-    const answer = readBoard(this.fetch, port).finally(() => this.waiting.delete(port));
-    const late = this.sleep(TIMEOUT_MS).then(() => null);
-    return Promise.race([answer, late]);
+  // One fetch per url at a time: one that never answers must not pile more up behind it.
+  get(port, path) {
+    const url = `http://127.0.0.1:${port}${path}`;
+    if (this.open.has(url)) return Promise.resolve(null);
+    this.open.add(url);
+    return this.bounded(getJson(this.fetch, url).catch(() => null).finally(() => this.open.delete(url)));
   }
 
-  async round() {
-    const scan = this.boards.size === 0 || this.rounds % SCAN_EVERY === 0;
-    this.rounds += 1;
-    const ports = scan ? this.ports : [...this.boards.keys()];
-    const results = await Promise.all(ports.map((port) => this.read(port)));
-    ports.forEach((port, i) => {
-      if (results[i]) {
-        this.boards.set(port, results[i]);
-        this.misses.delete(port);
-      } else if (this.boards.has(port)) {
-        const missed = (this.misses.get(port) ?? 0) + 1;
-        this.misses.set(port, missed);
-        if (missed >= MISSES_TO_DROP) {
-          this.boards.delete(port);
-          this.misses.delete(port);
-        }
-      }
-    });
-    this.failures = this.boards.size ? 0 : this.failures + 1;
-    this.next = this.now() + delayAfter(this.boards.size ? 0 : this.failures - 1);
-    const first = !this.scanned;
-    this.scanned = true;
-    const sig = JSON.stringify(this.list().map(withoutClock));
-    if (sig !== this.sig || first) {
-      this.sig = sig;
-      this.changed();
+  async scan() {
+    const ports = Array.from({ length: PORT_COUNT }, (_, i) => this.base + i);
+    const seen = await Promise.all(ports.map((port) => this.get(port, "/panel")));
+    this.maps = seen.filter((m) => m?.app === "agenttrail" && m.repoPath)
+      .map(({ port, project, repoPath }) => ({ port, project, repoPath }))
+      .sort((a, b) => String(a.project).localeCompare(String(b.project)) || a.port - b.port);
+    this.scannedAt = this.now();
+  }
+
+  async rootOf(folder) {
+    if (!folder) return null;
+    if (this.roots.has(folder)) return this.roots.get(folder);
+    const root = norm(await this.bounded(this.root(folder).catch(() => null)));
+    if (root) this.roots.set(folder, root);
+    return root || null;
+  }
+
+  wanted(folder, root) {
+    return this.fixed ?? this.chosen ?? pickMap(this.maps, folder, root)?.port ?? null;
+  }
+
+  async read(folder) {
+    const root = this.fixed ? null : await this.rootOf(folder);
+    const place = root ?? folder;
+    const moved = place !== this.place;
+    if (moved) Object.assign(this, { place, chosen: null, misses: 0 });
+    let port = this.wanted(folder, root);
+    if (!port && !this.fixed && (moved || this.eager() || this.now() - this.scannedAt >= SCAN_MS)) {
+      await this.scan();
+      port = this.wanted(folder, root);
     }
+    let board = port ? await this.get(port, "/board-lite") : null;
+    if (port && !board) {
+      this.misses += 1;
+      if (!moved && port === this.port && this.misses < MISSES_TO_DROP) return false;
+      this.misses = 0;
+      this.chosen = null;
+      if (!this.fixed) {
+        await this.scan();
+        port = this.wanted(folder, root);
+        board = port ? await this.get(port, "/board-lite") : null;
+      }
+    } else this.misses = 0;
+    const kind = board ? "map" : this.fixed ? "gone" : !folder ? "none" : root ? "off" : "plain";
+    return this.settle(kind, root ?? folder, board ? port : this.fixed, board);
   }
 
-  // Look again at the next tick rather than wait out a backoff.
-  wake() {
-    this.failures = 0;
-    this.next = 0;
+  settle(kind, repo, port, board) {
+    const here = this.maps.find((m) => m.port === port);
+    const state = { kind, repo: here?.repoPath ?? (this.fixed ? null : repo), port, others: this.maps.filter((m) => m.port !== port), away: this.chosen ? this.place : null };
+    const sig = JSON.stringify({ state, board: board && { ...board, now: 0 } });
+    if (sig === this.sig) return false;
+    Object.assign(this, { sig, state, board, port: board ? port : null });
+    return true;
   }
 
+  choose(port) {
+    this.chosen = port;
+  }
+
+  back() {
+    this.chosen = null;
+  }
+
+  // Resolves true when what to show changed. Focus can move during a slow read, so that
+  // read's answer is followed at once by one for where focus is now.
   async tick() {
-    if (this.now() >= this.next) await this.round();
+    let changed = false;
+    do {
+      this.at = this.fixed ? null : this.folder();
+      changed = (await this.read(this.at).catch(() => false)) || changed;
+    } while (!this.fixed && this.folder() !== this.at);
+    return changed;
   }
 }

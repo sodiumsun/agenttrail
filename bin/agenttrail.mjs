@@ -802,7 +802,7 @@ function panelModel() {
     // through a symlink would otherwise match nothing.
     project: session.project, repoPath: repoRoots.at(-1), port,
     hasPlan: planText.length > 0,
-    components: inferring() ? [] : parsed.nodes.filter(n => n.level === 'component'), // the list panel's paths are a plan's
+    components: inferring() ? [] : parsed.nodes.filter(n => n.level === 'component'), // a run's path is made of a plan's components
     runs: liveRuns(),
     sources: {
       hooks: hooksInstalled(),
@@ -1046,7 +1046,7 @@ function listenWithFallback(tries = 20) {
 }
 const BACKFILL_PROMPT = 'Read the "agenttrail plan convention" section in CLAUDE.md or AGENTS.md. Then study this repo in trust order — the code and directory layout first (what exists), git log for what is actually recent, decision logs and any in-progress build/handoff docs for what is in flight, and README/roadmap prose LAST and only for open intent (founding docs rot; cross-check their claims against git log) — and rewrite PLAN.md as the real map of this codebase: components with stable {#id}s, needs:/links: edges between them, files: globs for the paths each owns, and verb-led concrete titles with tech: sublines. Keep it to 5-9 components no matter how big the repo — a component is a part one agent could own for a session, with its own doneness and at least one edge; anything smaller is a task inside one. Verify every status against the CODE, not the docs — READMEs and roadmaps rot; mark [x] only after finding the implementing source or artifact, and cite that evidence on its tech: line (e.g. tech: TurnView.swift) so a human can audit every tick; if you cannot find evidence, leave it unchecked and say so in the decisions note. Statuses must be honest — [x] only for what verifiably exists, [~] only for what you are working on right now, everything else [ ]. Tag open tasks with an indented from: line naming provenance — from: agent when an in-progress build/handoff doc or your own declared intent claims it imminently, from: roadmap when sourced only from planning docs; omit when unsure. Record the backfill under ## decisions.'
 async function firstRunFlow() {
-  // --no-open means something else started this daemon (the Herdr panel, autostart):
+  // --no-open means something else started this daemon (the Herdr mod, autostart):
   // nobody is waiting at a setup prompt, and pressing Enter must not write to the repo.
   if (planText.length || !process.stdin.isTTY || noOpen) return
   console.log('\nno PLAN.md here yet — the live layer works now; the map needs a plan.')

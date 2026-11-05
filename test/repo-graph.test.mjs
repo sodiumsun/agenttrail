@@ -10,7 +10,7 @@ import { after, describe, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { areaId, areaTitle, chooseAreas, describeAreas, ownerOf } from '../bin/lib/areas.mjs'
 import { assignCommits, boardNodes, folderLine, keepOrder, parseLog, parseRefs, parseWorktrees, readHistory, streamId } from '../bin/lib/workstreams.mjs'
-import { boardEdges, boardLayout, cardLine, detailHeight, inferredNote, isUnfolded, liveCard, openingCard } from '../herdr/agenttrail-map/mods/agenttrail-map/graph.js'
+import { boardEdges, boardLayout, cardLine, detailHeight, inferredNote, isUnfolded, liveCard, openingCard } from '../herdr/agenttrail/mods/agenttrail/graph.js'
 import { freePortBase, startMap, stopAll, tempDir, tempWorld, until } from './helpers.mjs'
 import { hits, scan } from './leak-scan.mjs'
 

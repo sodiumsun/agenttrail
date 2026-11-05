@@ -91,7 +91,7 @@ Map reads logs touched in the last two hours and at most the last 2 MiB of each.
 
 ## Beside your agents in Herdr
 
-A panel for the [Herdr](https://herdr.dev) desktop app shows each agent's task, its recent path through the project and its status, and jumps to its terminal on a click. It reads Map through a small read-only feed. See [herdr/README.md](herdr/README.md).
+A mod for the [Herdr](https://herdr.dev) desktop app draws Map natively beside your agents: the same cards and connectors from `PLAN.md`, in a side panel that expands to full size and follows the repo of the focused terminal. With no plan it falls back to a simple view from git. It only reads. See [herdr/README.md](herdr/README.md).
 
 ## Local by construction
 

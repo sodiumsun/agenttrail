@@ -56,7 +56,7 @@ Map reads sessions working inside the watched repo, from logs touched in the las
 
 ## The panel feed
 
-`GET /panel` is a small, versioned, read-only summary for the Herdr panel: each run's status, open task, last tool, recent path, terminal id and evidence, under the same local request checks as every other route. A task is `reported`, a tool `observed` and a path `inferred`. See [herdr/README.md](../herdr/README.md).
+`GET /panel` is a small, versioned, read-only summary, under the same local request checks as every other route: each run's status, open task, last tool, recent path, terminal id and evidence. A task is `reported`, a tool `observed` and a path `inferred`. The Herdr mod reads it to find the Maps on this computer, then draws from `/board-lite`. See [herdr/README.md](../herdr/README.md).
 
 ## What stays on your machine
 
