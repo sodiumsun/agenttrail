@@ -189,5 +189,23 @@ export function readSuperpowers(repo) {
   return { nodes, mtime: mtime || null, found: true }
 }
 
+// A cheap fingerprint of every file readSuperpowers reads: names, sizes and times only.
+// Where the repo cannot be watched recursively, Map polls this instead of the folders.
+export function superpowersStamp(repo) {
+  const parts = []
+  const add = file => { try { const st = fs.statSync(file); parts.push(`${file}:${st.size}:${st.mtimeMs}`) } catch {} }
+  for (const sub of ['specs', 'plans']) {
+    const dir = path.join(repo, SP_DOCS, sub)
+    for (const name of listMd(dir)) add(path.join(dir, name))
+  }
+  try {
+    for (const d of fs.readdirSync(path.join(repo, SP_LEDGERS), { withFileTypes: true }).filter(d => d.isDirectory()).slice(0, MAX_FILES)) {
+      add(path.join(repo, SP_LEDGERS, d.name, 'progress.md'))
+      add(path.join(repo, SP_LEDGERS, d.name, 'plan-path'))
+    }
+  } catch {}
+  return parts.join('\n')
+}
+
 // Writes under these paths change what readSuperpowers returns.
 export const isSuperpowersPath = rel => rel === SP_DOCS || rel.startsWith(SP_DOCS + '/') || rel === SP_LEDGERS || rel.startsWith(SP_LEDGERS + '/')

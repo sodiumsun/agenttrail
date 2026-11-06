@@ -15,8 +15,10 @@ import { CodexLogReader } from './lib/codex.mjs'
 import { panelFeed } from './lib/panel.mjs'
 import { IGNORE, TMP_FILE, areaId, ownerOf } from './lib/areas.mjs'
 import { boardNodes } from './lib/workstreams.mjs'
-import { readSuperpowers, isSuperpowersPath } from './lib/superpowers.mjs'
+import { readSuperpowers, isSuperpowersPath, superpowersStamp } from './lib/superpowers.mjs'
 import { Worker } from 'node:worker_threads'
+
+const SP_POLL_MS = parseInt(process.env.AGENTTRAIL_SP_POLL_MS, 10) || 2000 // Superpowers poll, used only when the repo cannot be watched recursively
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -778,6 +780,15 @@ try {
   } catch (e2) {
     console.error('watcher failed:', e2.message)
   }
+  // Superpowers documents sit in nested folders this watch cannot see: poll their stamp instead.
+  let spStamp = superpowersStamp(repo)
+  setInterval(() => {
+    const next = superpowersStamp(repo)
+    if (next === spStamp) return
+    spStamp = next
+    readPlan()
+    broadcast()
+  }, SP_POLL_MS).unref()
 }
 let lastActivityPush = 0
 function throttleBroadcast() {

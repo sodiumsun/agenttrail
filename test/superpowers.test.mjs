@@ -6,6 +6,8 @@ import { afterEach, describe, test } from 'node:test'
 import { parseLedger, parseSpPlan, readSuperpowers } from '../bin/lib/superpowers.mjs'
 import { freePortBase, startMap, stopAll, tempDir, tempWorld, until } from './helpers.mjs'
 
+const NO_RECURSIVE = new URL('./no-recursive-watch.mjs', import.meta.url).href
+
 const PLAN = `# Tide Alerts Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Steps use checkbox (\`- [ ]\`) syntax for tracking.
@@ -143,5 +145,16 @@ describe('the Map daemon', () => {
     assert.ok(!m.lints.some(l => l.includes('sp-')), m.lints.join('\n'))
     writeTrail(world.repo, { plan: PLAN.replace('- [ ] **Step 2: Implement it**', '- [x] **Step 2: Implement it**') })
     await until(async () => (await map.model()).plan.find(n => n.id === 'sp-tide-alerts-t2').status === 'done', 'the ticked step')
+  })
+  test('where the repo cannot be watched recursively, Superpowers edits still arrive', async () => {
+    await boot('# p\n\n## Part {#part}\nfiles: [src/**]\n- [ ] t {#t}\n')
+    writeTrail(world.repo)
+    const map = await startMap({ repo: world.repo, home: world.home, base: await freePortBase(), env: { NODE_OPTIONS: `--import=${NO_RECURSIVE}`, AGENTTRAIL_SP_POLL_MS: '100' } })
+    const status = async id => (await map.model()).plan.find(n => n.id === id).status
+    assert.equal(await status('sp-tide-alerts-t2'), 'active')
+    writeTrail(world.repo, { plan: PLAN.replace('- [ ] **Step 2: Implement it**', '- [x] **Step 2: Implement it**') })
+    await until(async () => (await status('sp-tide-alerts-t2')) === 'done', 'the ticked step, through the fallback watcher')
+    writeTrail(world.repo, { plan: PLAN.replace('- [ ] **Step 2: Implement it**', '- [x] **Step 2: Implement it**'), ledger: '# SDD ledger — plan: docs/superpowers/plans/2026-01-03-tide-alerts.md\nTask 3: complete\n' })
+    await until(async () => (await status('sp-tide-alerts-t3')) === 'done', 'the ledger line, through the fallback watcher')
   })
 })
