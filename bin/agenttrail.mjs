@@ -254,7 +254,7 @@ function relToRepo(p) {
   if (inferring()) return locate(p)?.rel ?? null
   const r = path.resolve(String(p))
   const root = repoRoots.find(x => r === x || r.startsWith(x + path.sep))
-  return root === undefined ? null : r.slice(root.length + 1)
+  return root === undefined ? null : posixRel(r.slice(root.length + 1))
 }
 // A hook and a log can both report one call. Their ids settle it; a hook that
 // carries no id is matched on what the call was and when.
@@ -524,11 +524,13 @@ function noteRecent(entry) {
 }
 // The deepest worktree holding a path. Worktrees can sit anywhere, so a walk up the path
 // answers in a few steps however many a repo has.
+// Plan globs, the tree and the scene speak forward slashes; path.relative pieces are backslashed on Windows.
+const posixRel = rel => path.sep === '/' ? rel : rel.split(path.sep).join('/')
 function locate(p) {
   const r = path.resolve(String(p))
   const trees = gitScan?.worktrees || {}
   for (let at = r; ; at = path.dirname(at)) {
-    if (at in trees || repoRoots.includes(at)) return { root: at, rel: r.slice(at.length + 1), card: trees[at] ?? null }
+    if (at in trees || repoRoots.includes(at)) return { root: at, rel: posixRel(r.slice(at.length + 1)), card: trees[at] ?? null }
     if (at === path.dirname(at)) return null
   }
 }
@@ -721,8 +723,9 @@ function broadcastTick() {
 
 // ---------- watcher ----------
 let planDebounce = null
+let repoWatcher = null
 try {
-  fs.watch(repo, { recursive: true }, (_ev, filename) => {
+  repoWatcher = fs.watch(repo, { recursive: true }, (_ev, filename) => {
     if (!filename) return
     const f = filename.toString().split(path.sep).join('/')
     if (IGNORE.test(f) || TMP_FILE.test(f)) return
@@ -748,7 +751,7 @@ try {
   // recursive watch is unsupported on some platforms (older linux) — degrade:
   // PLAN.md and top-level changes still tracked, deep activity limited.
   try {
-    fs.watch(repo, (_ev, filename) => {
+    repoWatcher = fs.watch(repo, (_ev, filename) => {
       if (!filename) return
       const f = filename.toString()
       if (path.resolve(repo, f) === planPath) {
@@ -1082,7 +1085,13 @@ async function bootDedup() {
   for (const p of boardPorts) probes.push(
     fetch(`http://127.0.0.1:${p}/whoami`, { signal: AbortSignal.timeout(400) }).then(r => r.json()).then(w => w.repoPath === repo ? p : null).catch(() => null))
   const hit = (await Promise.all(probes)).find(Boolean)
-  if (hit) { console.log(`agenttrail is already running for this repo · http://localhost:${hit}`); process.exit(0) }
+  if (hit) {
+    console.log(`agenttrail is already running for this repo · http://localhost:${hit}`)
+    // Release the watcher and let the loop drain: a forced process.exit() here races
+    // the probe sockets still closing and aborts on a libuv assertion on Windows.
+    try { repoWatcher?.close() } catch {}
+    return
+  }
   server.once('listening', onListen) // here, not per attempt: a failed attempt's callback would also fire
   listenWithFallback()
 }
