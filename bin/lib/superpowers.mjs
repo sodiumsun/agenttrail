@@ -2,28 +2,39 @@
 //   docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md   brainstorming's design spec
 //   docs/superpowers/plans/YYYY-MM-DD-<feature>.md        writing-plans' task-by-task plan
 //   .superpowers/sdd/<plan>/progress.md                   the executor's ledger: "Task N: complete"
-// Each feature (a plan, its spec, or both) becomes one card on the map. Tasks
-// come from the plan's `### Task N:` headings; a task is done when the ledger
-// says so or every one of its step checkboxes is ticked. Read-only, like the rest of Map.
+// A ledger names its plan ("# SDD ledger — plan: <path>", or a plan-path file beside it),
+// so a plan kept anywhere in the repo is found through its ledger. A ledger committed
+// next to the plans (…-ledger.md) is read as a ledger, not as another plan.
+//
+// Each feature (a plan, its spec, or both) becomes one card on the map. Tasks come
+// from the plan's `### Task N:` headings; a task is done when a ledger says so or
+// every one of its step boxes is ticked. Most executors tick nothing and drop the
+// ledger when the work ends, so a plan with neither says its progress is not
+// recorded rather than claiming nothing was done. A plan trail grows for months,
+// so only features whose files changed recently are shown. Read-only, like the rest of Map.
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 
 export const SP_DOCS = 'docs/superpowers'
 export const SP_LEDGERS = '.superpowers/sdd'
-const MAX_FILES = 200 // per folder: a plan trail, not an archive
+const MAX_FILES = 400 // per folder: a plan trail, not an archive
 const MAX_BYTES = 1_000_000
-const DONE_SHOWN = 3 // finished features beyond this many (newest first) leave the map
+export const RECENT_DAYS = 14 // a feature whose plan, spec and ledger are all older than this leaves the map
+const MAX_CARDS = 12 // newest first, even within the window
 
 const DATED = /^(\d{4}-\d{2}-\d{2})-(.+)$/
-const TASK_HEAD = /^#{2,4}\s+Task\s+(\d+)\s*[:.\-—]\s*(.+?)\s*$/i
+const TASK_HEAD = /^#{2,4}\s+Task\s+(\d+[a-z]?)\s*[:.\-—]\s*(.+?)\s*$/i
 const STEP = /^\s*[-*]\s+\[( |x|X)\]\s+/
 const FILE_ITEM = /^\s*[-*]\s+(?:Create|Modify|Test|Update|Delete|Edit|Add)\s*:\s*`([^`]+)`/i
 const SPEC_LINE = /^\s*\*\*Spec:\*\*\s*`?([^`\s]+\.md)`?/i
 const GOAL_LINE = /^\s*\*\*Goal:\*\*\s*(.+?)\s*$/i
-const LEDGER_DONE = /^\s*Task\s+(\d+)\s*:\s*complete\b/i
+const LEDGER_HEAD = /^#\s*SDD ledger\s*[—–-]+\s*plan:\s*(.+?)\s*$/i
+const LEDGER_DONE = /^\s*Task\s+(\d+[a-z]?)\s*:\s*complete\b/i
 
 const slugId = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'feature'
 const posix = p => p.split(path.sep).join('/')
+const tidy = s => s.replace(/\*\*/g, '').replace(/[\s—–:\-]+$/, '').trim()
 
 function readSmall(file) {
   try {
@@ -38,6 +49,14 @@ function listMd(dir) {
       .filter(d => d.isFile() && d.name.toLowerCase().endsWith('.md'))
       .map(d => d.name).sort().reverse().slice(0, MAX_FILES)
   } catch { return [] }
+}
+// A path a document names, as repo-relative posix — or null when it leaves the repo or is not markdown.
+function inRepo(repo, p) {
+  if (!p || !/\.md$/i.test(p)) return null
+  const abs = path.resolve(repo, p)
+  const rel = path.relative(repo, abs)
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null
+  return posix(rel)
 }
 // Lines outside ``` / ~~~ fences: a plan's code samples are full of checkboxes and headings.
 function prose(text) {
@@ -59,18 +78,18 @@ function heading(lines) {
   const h = lines.find(l => /^#\s+/.test(l))
   return h ? h.replace(/^#\s+/, '').trim() : ''
 }
-// "2026-11-06-live-map.md" -> { date, slug: "live-map" }; a spec drops its "-design" tail.
+// "2026-11-06-live-map.md" -> { date, slug: "live-map" }; a spec drops its "-design" tail, a plan its "-plan".
 function nameParts(file, spec) {
   const base = path.basename(file, path.extname(file))
   const m = base.match(DATED)
   let slug = m ? m[2] : base
-  if (spec) slug = slug.replace(/-(design|spec)$/i, '')
+  slug = spec ? slug.replace(/-(design|spec)$/i, '') : slug.replace(/-plan$/i, '')
   return { date: m ? m[1] : '', slug }
 }
 
 export function parseSpPlan(text) {
   const lines = prose(text)
-  const title = heading(lines).replace(/\s+implementation\s+plan\s*$/i, '').trim()
+  const title = tidy(heading(lines).replace(/\s+implementation\s+plan\s*$/i, ''))
   let goal = '', spec = '', cur = null, inFiles = false
   const tasks = []
   for (const line of lines) {
@@ -78,7 +97,7 @@ export function parseSpPlan(text) {
     if (!goal && (m = line.match(GOAL_LINE))) { goal = m[1]; continue }
     if (!spec && (m = line.match(SPEC_LINE))) { spec = m[1]; continue }
     if ((m = line.match(TASK_HEAD))) {
-      cur = { n: Number(m[1]), title: m[2].replace(/\*\*/g, ''), files: [], steps: 0, ticked: 0 }
+      cur = { n: m[1].toLowerCase(), title: tidy(m[2]), files: [], steps: 0, ticked: 0 }
       tasks.push(cur)
       inFiles = false
       continue
@@ -93,73 +112,128 @@ export function parseSpPlan(text) {
   return { title, goal, spec, tasks }
 }
 
-// The ledger names its plan on line one: "# SDD ledger — plan: <path>".
+// A ledger names its plan in its "# SDD ledger — plan: <path>" line, near the top. null when the text is no ledger.
 export function parseLedger(text) {
   const lines = text.split('\n')
-  const m = (lines[0] || '').match(/plan:\s*(.+?)\s*$/i)
+  let plan = null
+  for (const l of lines.slice(0, 15)) { const m = l.replace(/\r$/, '').match(LEDGER_HEAD); if (m) { plan = m[1].replace(/^`|`$/g, ''); break } }
+  if (plan === null) return null
   const done = new Set()
-  for (const l of lines) { const d = l.match(LEDGER_DONE); if (d) done.add(Number(d[1])) }
-  return { plan: m ? m[1] : '', done }
+  for (const l of lines) { const d = l.match(LEDGER_DONE); if (d) done.add(d[1].toLowerCase()) }
+  return { plan, done }
 }
 
-function readLedgers(repo) {
+// When each file last changed: its last commit, or its time on disk while it is new or edited.
+// One bounded, read-only git call for the window; outside git, times on disk.
+function changeTimes(repo, rels, sinceMs) {
+  const out = new Map()
+  const disk = rel => { try { return fs.statSync(path.join(repo, rel)).mtimeMs } catch { return 0 } }
+  const git = args => execFileSync('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.quotePath=false', ...args], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 8 << 20, timeout: 4000 })
+  let tracked = null, dirty = null
+  const committed = new Map()
+  try {
+    const dirs = [...new Set(rels.map(r => path.posix.dirname(r)))]
+    const prefix = git(['rev-parse', '--show-prefix']).trim() // status and log name paths from the git root; Map's repo may sit below it
+    const own = p => p.startsWith(prefix) ? p.slice(prefix.length) : null
+    tracked = new Set(git(['ls-files', '-z', '--', ...dirs]).split('\0').filter(Boolean))
+    // -z status entries: "XY path"; a rename carries its old path as the next entry, which is skipped
+    const entries = git(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', ...dirs]).split('\0')
+    dirty = new Set()
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i]
+      if (!e) continue
+      const p = own(e.slice(3))
+      if (p) dirty.add(p)
+      if (e[0] === 'R' || e[0] === 'C') i++
+    }
+    let at = 0
+    for (const line of git(['log', `--since=${Math.floor(sinceMs / 1000)}`, '--format=%x01%ct', '--name-only', '--', ...dirs]).split('\n')) {
+      if (line.startsWith('\x01')) { at = Number(line.slice(1)) * 1000; continue }
+      const p = line && own(line)
+      if (p && !committed.has(p)) committed.set(p, at)
+    }
+  } catch { tracked = null }
+  for (const rel of rels) {
+    if (!tracked || !tracked.has(rel) || dirty.has(rel)) out.set(rel, Math.max(disk(rel), committed.get(rel) || 0)) // new, edited, ignored or no git
+    else out.set(rel, committed.get(rel) || 0) // committed and clean: only a commit in the window counts
+  }
+  return out
+}
+
+function readLedgers(repo, read) {
   const base = path.join(repo, SP_LEDGERS)
   const out = []
   let dirs = []
   try { dirs = fs.readdirSync(base, { withFileTypes: true }).filter(d => d.isDirectory()).slice(0, MAX_FILES) } catch { return out }
   for (const d of dirs) {
-    const got = readSmall(path.join(base, d.name, 'progress.md'))
-    if (!got) continue
     const marker = readSmall(path.join(base, d.name, 'plan-path'))
-    const led = parseLedger(got.text)
-    out.push({ dir: d.name, plan: (marker?.text.trim() || led.plan), done: led.done, mtime: got.mtime })
+    const got = readSmall(path.join(base, d.name, 'progress.md'))
+    const led = got && parseLedger(got.text)
+    const plan = inRepo(repo, marker?.text.trim() || led?.plan || '')
+    if (!plan) continue
+    const rel = `${SP_LEDGERS}/${d.name}/${got ? 'progress.md' : 'plan-path'}`
+    read.push(rel)
+    out.push({ rel, plan, done: led?.done || new Set() })
   }
   return out
 }
-// A ledger path may be repo-relative, absolute or Git-Bash shaped; compare on the tail under docs/superpowers.
-function samePlan(ledgerPlan, rel) {
-  if (!ledgerPlan) return false
-  const a = posix(ledgerPlan).replace(/^\.\//, '')
-  return a === rel || a.endsWith('/' + rel)
-}
 
 // Everything Superpowers has written in this repo, as Map plan nodes.
-// Returns { nodes, mtime, found } — found is false when the repo has no Superpowers trail.
-export function readSuperpowers(repo) {
-  const specDir = path.join(repo, SP_DOCS, 'specs'), planDir = path.join(repo, SP_DOCS, 'plans')
-  const specNames = listMd(specDir), planNames = listMd(planDir)
-  if (!specNames.length && !planNames.length) return { nodes: [], mtime: null, found: false }
-  const ledgers = readLedgers(repo)
-  let mtime = 0
-  const specs = new Map() // rel path -> spec
-  for (const name of specNames) {
-    const got = readSmall(path.join(specDir, name))
+// Returns { nodes, files, found }: files are what was read (repo-relative), found is false with no trail at all.
+export function readSuperpowers(repo, { now = Date.now(), days = RECENT_DAYS } = {}) {
+  const read = []
+  const ledgers = readLedgers(repo, read)
+  const plans = new Map() // rel -> { rel, text }
+  const specs = new Map() // rel -> spec
+  const planDir = `${SP_DOCS}/plans`, specDir = `${SP_DOCS}/specs`
+  for (const name of listMd(path.join(repo, planDir))) {
+    const rel = `${planDir}/${name}`
+    const got = readSmall(path.join(repo, rel))
     if (!got) continue
-    mtime = Math.max(mtime, got.mtime)
-    const rel = `${SP_DOCS}/specs/${name}`
-    const title = heading(prose(got.text)).replace(/^design\s*[:—-]\s*/i, '').replace(/\s*[:—-]?\s*design(\s+(doc|spec))?\s*$/i, '').trim()
-    specs.set(rel, { rel, title, ...nameParts(name, true), used: false })
+    read.push(rel)
+    const led = parseLedger(got.text)
+    if (led) { const plan = inRepo(repo, led.plan); if (plan) ledgers.push({ rel, plan, done: led.done }); continue }
+    plans.set(rel, { rel, text: got.text })
   }
-  const features = []
-  for (const name of planNames) {
-    const got = readSmall(path.join(planDir, name))
-    if (!got) continue
-    mtime = Math.max(mtime, got.mtime)
-    const rel = `${SP_DOCS}/plans/${name}`
-    const plan = parseSpPlan(got.text)
-    const parts = nameParts(name, false)
-    const named = plan.spec && [...specs.values()].find(s => samePlan(plan.spec, s.rel))
-    const spec = named || [...specs.values()].find(s => !s.used && s.slug === parts.slug)
-    if (spec) spec.used = true
-    const ledger = ledgers.filter(l => samePlan(l.plan, rel)).sort((a, b) => b.mtime - a.mtime)[0] ||
-      ledgers.find(l => !l.plan && l.dir === path.basename(name, '.md'))
-    features.push({ rel, plan, parts, spec, ledger })
+  for (const l of ledgers) { // a plan kept outside docs/superpowers is found through its ledger
+    if (plans.has(l.plan)) continue
+    const got = readSmall(path.join(repo, l.plan))
+    if (got) { read.push(l.plan); plans.set(l.plan, { rel: l.plan, text: got.text }) }
   }
-  for (const spec of specs.values()) if (!spec.used) features.push({ rel: null, plan: null, parts: { date: spec.date, slug: spec.slug }, spec, ledger: null })
+  const addSpec = (rel, text) => {
+    read.push(rel)
+    specs.set(rel, { rel, title: tidy(heading(prose(text)).replace(/^design\s*[:—-]\s*/i, '').replace(/\s*[:—-]?\s*design(\s+(doc|spec))?\s*$/i, '')), ...nameParts(rel, true), used: false })
+  }
+  for (const name of listMd(path.join(repo, specDir))) {
+    const got = readSmall(path.join(repo, specDir, name))
+    if (got) addSpec(`${specDir}/${name}`, got.text)
+  }
+  if (!plans.size && !specs.size) return { nodes: [], files: read, found: false }
 
+  const features = []
+  for (const p of plans.values()) {
+    const plan = parseSpPlan(p.text)
+    const own = ledgers.filter(l => l.plan === p.rel)
+    if (!plan.tasks.length && !own.length) continue // findings, rulings, roadmaps: kept beside the plans, but not plans
+    const parts = nameParts(p.rel, false)
+    let spec = null
+    const named = inRepo(repo, plan.spec)
+    if (named && !specs.has(named)) { const got = readSmall(path.join(repo, named)); if (got) addSpec(named, got.text) } // a spec kept elsewhere, named by its plan
+    if (named) spec = specs.get(named) || null
+    if (!spec) spec = [...specs.values()].find(s => !s.used && s.slug === parts.slug && s.rel.startsWith(specDir + '/')) || null
+    if (spec) spec.used = true
+    const done = new Set(own.flatMap(l => [...l.done]))
+    features.push({ rel: p.rel, plan, parts, spec, ledgers: own, done })
+  }
+  for (const spec of specs.values()) if (!spec.used && spec.rel.startsWith(specDir + '/')) features.push({ rel: null, plan: null, parts: { date: spec.date, slug: spec.slug }, spec, ledgers: [], done: new Set() })
+
+  const since = now - days * 86400e3
+  const times = changeTimes(repo, [...new Set(features.flatMap(f => [f.rel, f.spec?.rel, ...f.ledgers.map(l => l.rel)]).filter(Boolean))], since)
   const cards = []
   const seen = new Set()
   for (const f of features) {
+    const changedAt = Math.max(0, ...[f.rel, f.spec?.rel, ...f.ledgers.map(l => l.rel)].filter(Boolean).map(r => times.get(r) || 0))
+    if (changedAt < since) continue
     let id = 'sp-' + slugId(f.parts.slug)
     for (let i = 2; seen.has(id); i++) id = `sp-${slugId(f.parts.slug)}-${i}`
     seen.add(id)
@@ -167,45 +241,40 @@ export function readSuperpowers(repo) {
     // Only what Superpowers recorded: the plan's own tasks, ticked steps, ledger lines. A spec with no plan has no tasks yet.
     const tasks = []
     for (const t of f.plan?.tasks || []) {
-      const ledgered = f.ledger?.done.has(t.n)
-      const status = ledgered || (t.steps > 0 && t.ticked === t.steps) ? 'done' : t.ticked > 0 ? 'active' : 'pending'
-      tasks.push({ id: `${id}-t${t.n}`, title: `Task ${t.n}: ${t.title}`, tech: t.files.slice(0, 3).join(', '), status })
+      const status = f.done.has(t.n) || (t.steps > 0 && t.ticked === t.steps) ? 'done' : t.ticked > 0 ? 'active' : 'pending'
+      tasks.push({ id: `${id}-t${slugId(t.n)}`, title: `Task ${t.n}: ${t.title}`, tech: t.files.slice(0, 3).join(', '), status })
     }
+    const recorded = f.ledgers.length > 0 || (f.plan?.tasks || []).some(t => t.ticked > 0)
     const files = [...new Set([f.rel, f.spec?.rel, ...(f.plan?.tasks || []).flatMap(t => t.files)].filter(Boolean))]
     const status = tasks.some(t => t.status === 'active') ? 'active' : tasks.length && tasks.every(t => t.status === 'done') ? 'done' : 'pending'
     const tech = `superpowers ${f.plan ? 'plan' : 'spec'}${f.parts.date ? ' · ' + f.parts.date : ''}`
-    cards.push({ id, title, tech, goal: f.plan?.goal || '', date: f.parts.date, status, files, tasks })
+    cards.push({ id, title, tech, changedAt, status, files, tasks, progress: tasks.length && !recorded ? 'unrecorded' : '' })
   }
-  // Newest first; every unfinished feature stays, finished ones only while recent.
-  cards.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-  let doneKept = 0
-  const shown = cards.filter(c => c.status !== 'done' || doneKept++ < DONE_SHOWN)
+  cards.sort((a, b) => b.changedAt - a.changedAt)
 
   const nodes = []
-  for (const c of shown) {
-    nodes.push({ id: c.id, title: c.title, level: 'component', parent: null, needs: [], links: [], files: c.files, tech: c.tech, by: '', kind: '', url: '', status: c.status, source: 'superpowers' })
+  for (const c of cards.slice(0, MAX_CARDS)) {
+    nodes.push({ id: c.id, title: c.title, level: 'component', parent: null, needs: [], links: [], files: c.files, tech: c.tech, by: '', kind: '', url: '', status: c.status, progress: c.progress, source: 'superpowers' })
     for (const t of c.tasks) nodes.push({ id: t.id, title: t.title, level: 'task', parent: c.id, needs: [], links: [], tech: t.tech, by: '', src: '', status: t.status, source: 'superpowers' })
   }
-  return { nodes, mtime: mtime || null, found: true }
+  return { nodes, files: [...new Set(read)], found: true }
 }
 
-// A cheap fingerprint of every file readSuperpowers reads: names, sizes and times only.
+// A cheap fingerprint of what readSuperpowers reads: names, sizes and times only.
 // Where the repo cannot be watched recursively, Map polls this instead of the folders.
-export function superpowersStamp(repo) {
+export function superpowersStamp(repo, known = []) {
   const parts = []
-  const add = file => { try { const st = fs.statSync(file); parts.push(`${file}:${st.size}:${st.mtimeMs}`) } catch {} }
-  for (const sub of ['specs', 'plans']) {
-    const dir = path.join(repo, SP_DOCS, sub)
-    for (const name of listMd(dir)) add(path.join(dir, name))
-  }
+  const add = rel => { try { const st = fs.statSync(path.join(repo, rel)); parts.push(`${rel}:${st.size}:${st.mtimeMs}`) } catch { parts.push(`${rel}:-`) } }
+  for (const sub of ['specs', 'plans']) for (const name of listMd(path.join(repo, SP_DOCS, sub))) add(`${SP_DOCS}/${sub}/${name}`)
   try {
     for (const d of fs.readdirSync(path.join(repo, SP_LEDGERS), { withFileTypes: true }).filter(d => d.isDirectory()).slice(0, MAX_FILES)) {
-      add(path.join(repo, SP_LEDGERS, d.name, 'progress.md'))
-      add(path.join(repo, SP_LEDGERS, d.name, 'plan-path'))
+      add(`${SP_LEDGERS}/${d.name}/progress.md`)
+      add(`${SP_LEDGERS}/${d.name}/plan-path`)
     }
   } catch {}
+  for (const rel of known) add(rel)
   return parts.join('\n')
 }
 
-// Writes under these paths change what readSuperpowers returns.
-export const isSuperpowersPath = rel => rel === SP_DOCS || rel.startsWith(SP_DOCS + '/') || rel === SP_LEDGERS || rel.startsWith(SP_LEDGERS + '/')
+// Writes under these paths change what readSuperpowers returns. Plans and specs kept elsewhere are passed in.
+export const isSuperpowersPath = (rel, known = []) => rel === SP_DOCS || rel.startsWith(SP_DOCS + '/') || rel === SP_LEDGERS || rel.startsWith(SP_LEDGERS + '/') || known.includes(rel)

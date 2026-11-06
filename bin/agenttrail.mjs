@@ -15,7 +15,7 @@ import { CodexLogReader } from './lib/codex.mjs'
 import { panelFeed } from './lib/panel.mjs'
 import { IGNORE, TMP_FILE, areaId, ownerOf } from './lib/areas.mjs'
 import { boardNodes } from './lib/workstreams.mjs'
-import { readSuperpowers, isSuperpowersPath, superpowersStamp } from './lib/superpowers.mjs'
+import { RECENT_DAYS, readSuperpowers, isSuperpowersPath, superpowersStamp } from './lib/superpowers.mjs'
 import { Worker } from 'node:worker_threads'
 
 const SP_POLL_MS = parseInt(process.env.AGENTTRAIL_SP_POLL_MS, 10) || 2000 // Superpowers poll, used only when the repo cannot be watched recursively
@@ -193,11 +193,18 @@ const session = { id: Math.random().toString(36).slice(2, 10), project: path.bas
 let planText = safeRead(planPath)
 let superpowers = readSuperpowers(repo) // docs/superpowers specs and plans, as cards beside PLAN.md's
 let parsed = withSuperpowers(parsePlan(planText))
-const inferring = () => planText.length === 0 && !superpowers.found // no plan of any kind: the map is built from git history
+const inferring = () => planText.length === 0 && !superpowers.nodes.length // no plan and no recent Superpowers feature: the map is built from git history
 const hasPlan = () => !inferring()
 function withSuperpowers(p) {
-  return superpowers.found ? { ...p, nodes: [...p.nodes, ...superpowers.nodes] } : p
+  return superpowers.nodes.length ? { ...p, nodes: [...p.nodes, ...superpowers.nodes] } : p
 }
+// A feature leaves the map once its files have been quiet for RECENT_DAYS; nothing is written then, so look again now and then.
+setInterval(() => {
+  if (!superpowers.found) return
+  const before = JSON.stringify(superpowers.nodes)
+  readPlan()
+  if (JSON.stringify(superpowers.nodes) !== before) broadcast()
+}, 15 * 60e3).unref()
 const SCAN_FORMAT = 1 // raise when a saved scan's shape changes: an older one is dropped, not read
 let gitScan = null // what git-scan.mjs last read, plus { print, scannedAt, splitAt }
 let activity = null // { file, at } — most recent non-plan repo write
@@ -746,7 +753,7 @@ try {
     if (!filename) return
     const f = filename.toString().split(path.sep).join('/')
     if (IGNORE.test(f) || TMP_FILE.test(f)) return
-    if (path.resolve(repo, f) === planPath || isSuperpowersPath(f)) {
+    if (path.resolve(repo, f) === planPath || isSuperpowersPath(f, superpowers.files)) {
       clearTimeout(planDebounce)
       planDebounce = setTimeout(() => { readPlan(); broadcast() }, 150)
       return
@@ -781,9 +788,9 @@ try {
     console.error('watcher failed:', e2.message)
   }
   // Superpowers documents sit in nested folders this watch cannot see: poll their stamp instead.
-  let spStamp = superpowersStamp(repo)
+  let spStamp = superpowersStamp(repo, superpowers.files)
   setInterval(() => {
-    const next = superpowersStamp(repo)
+    const next = superpowersStamp(repo, superpowers.files)
     if (next === spStamp) return
     spStamp = next
     readPlan()
@@ -1099,7 +1106,7 @@ function onListen() {
   if (firstGitScan) Promise.race([firstGitScan, new Promise(r => setTimeout(r, 3000))]).then(startLogs)
   else startLogs()
   console.log(`agenttrail · ${session.project} · http://localhost:${port}`)
-  if (superpowers.found) console.log(`superpowers: ${superpowers.nodes.filter(n => n.level === 'component').length} features on the map from docs/superpowers`)
+  if (superpowers.found) console.log(`superpowers: ${superpowers.nodes.filter(n => n.level === 'component').length} features changed in the last ${RECENT_DAYS} days are on the map`)
   if (!hasPlan()) console.log('no PLAN.md found — run `agenttrail init` in the repo to scaffold one')
   if (openBrowser && !noOpen) {
     const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open'

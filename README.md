@@ -79,7 +79,7 @@ links: [notify]
 
 ### Superpowers specs and plans
 
-If the repo uses [Superpowers](https://github.com/obra/superpowers), Map also reads `docs/superpowers/specs/` and `docs/superpowers/plans/` and draws each feature as a card beside your `PLAN.md` components, or on its own when there is no `PLAN.md`. A plan's `### Task N:` headings become the card's tasks and its `**Files:**` lists become the card's files, so live writes light it up. A task counts as done when the executor's ledger (`.superpowers/sdd/<plan>/progress.md`) records it complete or every step box is ticked. A spec with no plan yet shows as a card with no tasks. Unfinished features always show; finished ones only the newest three. Map only reads these files.
+If the repo uses [Superpowers](https://github.com/obra/superpowers), Map also reads its specs and plans (`docs/superpowers/specs/`, `docs/superpowers/plans/`, and any plan an executor's ledger in `.superpowers/sdd/` points to) and draws each feature changed in the last 14 days as a card beside your `PLAN.md` components, or on its own when there is no `PLAN.md`. A plan's `### Task N:` headings become the card's tasks and its `**Files:**` lists become the card's files, so live writes light it up. A task counts as done when a ledger records it complete (a live one, or one committed next to the plans) or every step box is ticked. When neither exists, the card says its progress is not recorded rather than claiming nothing was done. A spec with no plan yet shows as a card with no tasks. Map only reads these files.
 
 ## What it can see
 

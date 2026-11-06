@@ -470,7 +470,7 @@ export default class AgenttrailMap extends View {
       .when(Boolean(age), (el) => el.child(this.text(age, { right: 16, y: 76, size: 11, color: c.faint, mono: true })))
       .children(names.map((n, i) => this.agentMark(c, n, w - 26 - 24 * (i + 1), 26, 13)))
       .child(this.text(label, { x: 16, y: 52, size: 15, color: c.text, weight: 600 }))
-      .child(this.text(p.derived ? cardLine(p.meta, chip || age) : `${done} of ${list.length} tasks · ${p.status === "pending" && done > 0 ? "Underway" : statusLabel(p.status)}`, { x: 16, y: 76, size: 12, color: c.dim }))
+      .child(this.text(p.derived ? cardLine(p.meta, chip || age) : p.progress === "unrecorded" ? `${list.length} tasks · progress not recorded` : `${done} of ${list.length} tasks · ${p.status === "pending" && done > 0 ? "Underway" : statusLabel(p.status)}`, { x: 16, y: 76, size: 12, color: c.dim }))
       .when(!p.derived || Boolean(p.bar), (el) => el
         .child(div().absolute().left(16 * z).top(92 * z).w(barW).h(4 * z).rounded(2 * z).bg(c.hover))
         .child(div().absolute().left(16 * z).top(92 * z).w(total ? barW * filled / total : 0).h(4 * z).rounded(2 * z).bg(p.status === "active" ? c.accent : c.soft)))
