@@ -15,7 +15,10 @@ export const hits = (diff) => diff.split('\n')
 
 export function scan(cwd = process.cwd()) {
   const diff = (...args) => execFileSync('git', ['diff', '--unified=0', ...args], { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 })
-  return hits(diff('main..HEAD') + diff('--cached'))
+  // A pull request's CI checkout has no local main, only the remote one.
+  const base = ['main', 'origin/main'].find((ref) => { try { execFileSync('git', ['rev-parse', '--verify', '--quiet', ref], { cwd, stdio: 'ignore' }); return true } catch { return false } })
+  if (!base) throw new Error('leak scan needs main or origin/main to compare against')
+  return hits(diff(`${base}..HEAD`) + diff('--cached'))
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
