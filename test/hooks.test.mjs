@@ -147,6 +147,27 @@ describe('runs from hooks', () => {
     assert.equal((await run('s')).todos[0].status, 'completed')
   })
 
+  test('any agent can report a run through the documented ingest events', async () => {
+    const ingest = ev => map.post('/hook', { cwd: world.repo, session_id: 'pi-1', agent: 'pi', ...ev })
+    await ingest({ hook_event_name: 'SessionStart', source: 'startup' })
+    await ingest({ hook_event_name: 'PreToolUse', tool_name: 'edit', tool_input: { path: 'src/a.js' } })
+    let r = await run('pi-1')
+    assert.equal(r.provider, 'pi')
+    assert.equal(r.currentTool.name, 'edit')
+    await ingest({ hook_event_name: 'PostToolUse', tool_name: 'edit', tool_input: { path: 'src/a.js' }, files_written: ['src/a.js', 42, ''] })
+    await ingest({ hook_event_name: 'TodoUpdate', todos: [{ content: 'Wire the relay', status: 'in_progress' }, { title: 'Write docs', status: 'pending' }, { content: 'bad', status: 'nope' }] })
+    r = await run('pi-1')
+    assert.equal(r.currentTool, null)
+    assert.equal(r.recentTools[0].name, 'edit')
+    assert.deepEqual(r.todos, [{ content: 'Wire the relay', status: 'in_progress' }, { content: 'Write docs', status: 'pending' }])
+    const m = await map.model()
+    assert.equal(m.activity.file, 'src/a.js')
+    await ingest({ hook_event_name: 'TodoUpdate', todos: 'not a list' })
+    assert.equal((await run('pi-1')).todos.length, 2)
+    await ingest({ hook_event_name: 'SessionEnd' })
+    assert.equal((await run('pi-1')).status, 'ended')
+  })
+
   test('a run reports its provider and status', async () => {
     const r = await run('s')
     assert.equal(r.provider, 'claude')

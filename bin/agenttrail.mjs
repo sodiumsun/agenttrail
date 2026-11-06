@@ -8,7 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import crypto from 'node:crypto'
-import { applyTaskEffect, claudeTaskEffect, clean } from './lib/tasks.mjs'
+import { applyTaskEffect, claudeTaskEffect, clean, taskList } from './lib/tasks.mjs'
 import { hasMapRelay, repointRelays } from './lib/hooks.mjs'
 import { ClaudeLogReader, SUBAGENT_TOOL, subagentName, toolDetail as describeTool } from './lib/claude.mjs'
 import { CodexLogReader } from './lib/codex.mjs'
@@ -333,6 +333,13 @@ function handleHookEvent(ev) {
     run.currentTool = null
     if (ev.status !== 'error' && ev.status !== 'failed') commitTaskEffect(run, claudeTaskEffect(ev.tool_name, ev.tool_input, ev.tool_response ?? ev.tool_output), Date.now())
     noteRunWrite(run, ev.tool_input && (ev.tool_input.file_path || ev.tool_input.notebook_path), Date.now())
+    // Any agent can name the files a call wrote (docs/INGEST.md); relative paths are from its cwd.
+    if (Array.isArray(ev.files_written)) for (const f of ev.files_written.slice(0, 50)) if (typeof f === 'string' && f) noteRunWrite(run, path.resolve(cwd || repo, f), Date.now())
+  } else if (kind === 'TodoUpdate') {
+    // An agent with no TodoWrite-style tool sends its whole list (docs/INGEST.md).
+    const list = taskList(ev.todos)
+    if (!list) return false
+    commitTaskEffect(run, { replace: list }, Date.now())
   } else return false
   return true
 }
