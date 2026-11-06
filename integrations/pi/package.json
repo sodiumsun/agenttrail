@@ -1,0 +1,12 @@
+{
+  "name": "agenttrail-pi",
+  "version": "0.1.0",
+  "description": "Show pi sessions on Agenttrail Map: live tool activity, file trails and todo lists on your local project map.",
+  "type": "module",
+  "keywords": ["pi-package", "agenttrail", "observability", "coding-agents"],
+  "pi": { "extensions": ["./index.js"] },
+  "files": ["index.js", "README.md"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/sodiumsun/agenttrail.git", "directory": "integrations/pi" },
+  "homepage": "https://github.com/sodiumsun/agenttrail/tree/main/integrations/pi#readme"
+}

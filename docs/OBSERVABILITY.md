@@ -27,6 +27,8 @@ Provider logs and hooks add session identity, tool activity, lifecycle events an
 | Claude native task lists | Local logs; optional hooks | `TaskCreate`/`TaskUpdate`/`TaskGet`/`TaskList` and legacy `TodoWrite`, applied after the tool succeeds |
 | Claude sub-agents | Local logs; optional hooks | Rows on the parent run, for the `Agent` tool and the older `Task` |
 | Codex sessions and tools | Local logs | Experimental. `update_plan` lists when the log contains them |
+| pi sessions, tools and todos | [pi extension](../integrations/pi) | Posts to the ingest endpoint while pi runs |
+| Any other agent | [Ingest events](INGEST.md) it posts | Only what the agent chooses to report |
 | Cursor and other tools | None | File and plan observation only |
 
 Automated checks run on Linux and macOS. Windows remains unverified. Cloud sessions need logs on this machine.

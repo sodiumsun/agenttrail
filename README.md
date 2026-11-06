@@ -83,6 +83,8 @@ links: [notify]
 | --- | --- | --- |
 | Claude Code | Local logs in `~/.claude/projects`, automatically. Hooks are optional | Sessions, tool activity, file trails, sub-agents, and task lists from `TaskCreate`/`TaskUpdate` or `TodoWrite` |
 | Codex | Local logs in `~/.codex/sessions`, automatically | Sessions, tool activity and file trails. Plans appear only when the log contains an `update_plan` call, which recent versions rarely write, so they usually show as unknown |
+| pi | The [Agenttrail extension for pi](integrations/pi) | Sessions, tool activity, file trails, and todo lists from a `todo` tool |
+| Any other agent | Events it posts to Map, see [Reporting runs from any agent](docs/INGEST.md) | Whatever it reports: sessions, tools, written files and task lists |
 | Cursor and other tools | No session adapter | File changes and whatever the agent records in `PLAN.md` |
 
 Claude Code hooks are not needed to see a session. They add three things: events the moment they happen rather than within a few seconds, a reminder to the agent when the plan has fallen behind the code, and a terminal id in Map's data when the terminal sets `HC_TERMINAL_ID`. A session seen through both hooks and its log stays one run.
