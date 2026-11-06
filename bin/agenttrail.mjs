@@ -15,6 +15,7 @@ import { CodexLogReader } from './lib/codex.mjs'
 import { panelFeed } from './lib/panel.mjs'
 import { IGNORE, TMP_FILE, areaId, ownerOf } from './lib/areas.mjs'
 import { boardNodes } from './lib/workstreams.mjs'
+import { readSuperpowers, isSuperpowersPath } from './lib/superpowers.mjs'
 import { Worker } from 'node:worker_threads'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -188,8 +189,13 @@ function parsePlan(text) {
 // ---------- live state ----------
 const session = { id: Math.random().toString(36).slice(2, 10), project: path.basename(repo), startedAt: new Date().toISOString() }
 let planText = safeRead(planPath)
-let parsed = parsePlan(planText)
-const inferring = () => planText.length === 0 // no plan: the map is built from git history
+let superpowers = readSuperpowers(repo) // docs/superpowers specs and plans, as cards beside PLAN.md's
+let parsed = withSuperpowers(parsePlan(planText))
+const inferring = () => planText.length === 0 && !superpowers.found // no plan of any kind: the map is built from git history
+const hasPlan = () => !inferring()
+function withSuperpowers(p) {
+  return superpowers.found ? { ...p, nodes: [...p.nodes, ...superpowers.nodes] } : p
+}
 const SCAN_FORMAT = 1 // raise when a saved scan's shape changes: an older one is dropped, not read
 let gitScan = null // what git-scan.mjs last read, plus { print, scannedAt, splitAt }
 let activity = null // { file, at } — most recent non-plan repo write
@@ -648,7 +654,8 @@ function isFolder(rel) {
 function readPlan() {
   const was = inferring()
   planText = safeRead(planPath)
-  parsed = parsePlan(planText)
+  superpowers = readSuperpowers(repo)
+  parsed = withSuperpowers(parsePlan(planText))
   planMtime = statMtime(planPath)
   if (inferring()) { useGit(); if (!gitScan) scanGit() }
   else { if (was) dropGit(); rebuildMatchers() }
@@ -674,11 +681,12 @@ function hotFiles() {
 }
 function lintPlan() {
   const out = []
-  const comps = parsed.nodes.filter(n => n.level === 'component')
-  const tasks = parsed.nodes.filter(n => n.level === 'task')
+  const own = parsed.nodes.filter(n => n.source !== 'superpowers') // the convention is PLAN.md's; Superpowers documents keep their own
+  const comps = own.filter(n => n.level === 'component')
+  const tasks = own.filter(n => n.level === 'task')
   if (!planText.length || (comps.length === 1 && tasks.length <= 1)) return out
   const ids = new Set()
-  for (const n of parsed.nodes) { if (ids.has(n.id)) out.push(`duplicate id {#${n.id}}`); ids.add(n.id) }
+  for (const n of own) { if (ids.has(n.id)) out.push(`duplicate id {#${n.id}}`); ids.add(n.id) }
   const compIds = new Set(comps.map(c => c.id))
   for (const c of comps) {
     for (const e of [...c.needs, ...c.links]) if (!compIds.has(e)) out.push(`${c.id}: edge to unknown component "${e}"`)
@@ -710,7 +718,7 @@ function model({ lite = false } = {}) {
     runs: liveRuns(),
     session, plan: parsed.nodes.map(n => n.level === 'component' ? { ...n, touchedAt: compTouched[n.id] || null, recent: compRecent[n.id] || [], filesList: compFilesFor(n.id) } : n), tree,
     planTitle: parsed.title,
-    hasPlan: planText.length > 0, treeTruncated,
+    hasPlan: hasPlan(), treeTruncated,
     activity, recentActivity, planMtime, handoffs, hotFiles: hotFiles(), cycles,
     planStale: planStaleness(), lints: lintPlan(), hooksInstalled: hooksInstalled(),
     now: Date.now(),
@@ -736,7 +744,7 @@ try {
     if (!filename) return
     const f = filename.toString().split(path.sep).join('/')
     if (IGNORE.test(f) || TMP_FILE.test(f)) return
-    if (path.resolve(repo, f) === planPath) {
+    if (path.resolve(repo, f) === planPath || isSuperpowersPath(f)) {
       clearTimeout(planDebounce)
       planDebounce = setTimeout(() => { readPlan(); broadcast() }, 150)
       return
@@ -800,7 +808,7 @@ setInterval(discoverBoards, 30000).unref()
 // ---------- fleet (the zoomed-out altitude) ----------
 function summaryModel() {
   return {
-    port, project: session.project, hasPlan: planText.length > 0,
+    port, project: session.project, hasPlan: hasPlan(),
     components: inferring() ? [] : parsed.nodes.filter(n => n.level === 'component').map(n => ({ id: n.id, title: n.title, status: n.status, touchedAt: compTouched[n.id] || null })),
     runs: liveRuns().map(r => ({ id: r.id, provider: r.provider, status: r.status, terminalId: r.terminalId, agent: r.agent, ended: r.ended, componentId: r.componentId, startedAt: r.startedAt, tool: r.currentTool ? `${r.currentTool.name} · ${r.currentTool.detail}` : null, todos: (r.todos || []).length, todosDone: (r.todos || []).filter(t => t.status === 'completed').length })),
     activity,
@@ -811,7 +819,7 @@ function panelModel() {
     // The resolved path: Herdr reports a terminal's real folder, so a repo opened
     // through a symlink would otherwise match nothing.
     project: session.project, repoPath: repoRoots.at(-1), port,
-    hasPlan: planText.length > 0,
+    hasPlan: hasPlan(),
     components: inferring() ? [] : parsed.nodes.filter(n => n.level === 'component'), // a run's path is made of a plan's components
     runs: liveRuns(),
     sources: {
@@ -1058,7 +1066,7 @@ const BACKFILL_PROMPT = 'Read the "agenttrail plan convention" section in CLAUDE
 async function firstRunFlow() {
   // --no-open means something else started this daemon (the Herdr mod, autostart):
   // nobody is waiting at a setup prompt, and pressing Enter must not write to the repo.
-  if (planText.length || !process.stdin.isTTY || noOpen) return
+  if (hasPlan() || !process.stdin.isTTY || noOpen) return
   console.log('\nno PLAN.md here yet — the live layer works now; the map needs a plan.')
   if (await askYesNo('set up the plan convention (PLAN.md skeleton + agent instructions + local hooks)? [Y/n] ')) {
     await init()
@@ -1080,7 +1088,8 @@ function onListen() {
   if (firstGitScan) Promise.race([firstGitScan, new Promise(r => setTimeout(r, 3000))]).then(startLogs)
   else startLogs()
   console.log(`agenttrail · ${session.project} · http://localhost:${port}`)
-  if (!planText) console.log('no PLAN.md found — run `agenttrail init` in the repo to scaffold one')
+  if (superpowers.found) console.log(`superpowers: ${superpowers.nodes.filter(n => n.level === 'component').length} features on the map from docs/superpowers`)
+  if (!hasPlan()) console.log('no PLAN.md found — run `agenttrail init` in the repo to scaffold one')
   if (openBrowser && !noOpen) {
     const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open'
     import('node:child_process').then(cp => cp.spawn(opener, [`http://localhost:${port}`], { stdio: 'ignore', detached: true }))

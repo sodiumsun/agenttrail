@@ -10,6 +10,7 @@ Agenttrail is a local observability tool for AI coding agents: a live project ma
 | Bounded log reading shared by the adapters | `bin/lib/logtail.mjs` |
 | Claude Code and Codex log adapters | `bin/lib/claude.mjs`, `bin/lib/codex.mjs` |
 | Native task lists | `bin/lib/tasks.mjs` |
+| Superpowers specs, plans and ledgers | `bin/lib/superpowers.mjs` |
 | Interface | `public/index.html` |
 | Automated checks | `test/` |
 

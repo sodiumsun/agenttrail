@@ -15,6 +15,9 @@ files: [bin/**]
 - [x] Lint the plan: structural warnings on the board {#plan-lint}
   by: claude
   tech: dup ids, unknown edge refs, uncited [x], missing files:, count governor
+- [x] Show Superpowers specs and plans as cards beside the plan {#plan-superpowers}
+  by: claude
+  tech: bin/lib/superpowers.mjs; docs/superpowers/{specs,plans}, .superpowers/sdd/*/progress.md ledgers; test/superpowers.test.mjs
 
 ## Watch the repo {#watcher}
 tech: recursive fs watcher
@@ -296,3 +299,4 @@ files: [README.md, docs/**, package.json, CONTRIBUTING.md, .github/**]
 - 2026-11-04: the Herdr panel is tasks under Watch live runs, not a new component. It passes three parts of the convention's test (it changes what the product does, a second task is plain in remote machines, it owns herdr/**) but fails the first: nothing depends on it yet and it is unpublished. Promote it to a card if work keeps clustering in herdr/**. The panel reads only GET /panel, a versioned feed, so it never depends on Map's internal run shape. A run links to a terminal by terminal id first, then by repo only when exactly one local agent and one live run match; otherwise the row stays unlinked
 - 2026-11-05: the native Map replaces the list panel in herdr/agenttrail, under the mod name agenttrail. One mod is simpler to list and install, and it shows what the panel only summarised. Map keeps GET /panel: the mod uses it to find Maps. The panel's row-to-terminal linking goes with it. Still tasks under Watch live runs, not a new component
 - 2026-11-05: the Herdr mod treats every Map reply as untrusted data. It fetches only 127.0.0.1, a whole port it scanned or was given in props, and /panel or /board-lite; a reply is rebuilt into the shapes the view draws, and one without a plan list is no board. Start Map here runs the agenttrail version the mod was released with, so updating the mod is what moves it
+- 2026-11-06: Superpowers specs and plans are read as cards beside PLAN.md's, a task under Read the plan file, not a new component. A feature is a plan paired with the spec its **Spec:** line names (or the spec with the same dated slug); a spec with no plan is a card with no tasks, never an invented checklist. A task is done only when its ledger line says complete or every step box is ticked, active when some are ticked. Unfinished features always show, finished ones only the newest three. Their cards stay out of PLAN.md's lints, and on their own they count as a plan, so the git-inferred map steps aside
