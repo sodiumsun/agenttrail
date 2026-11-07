@@ -13,7 +13,7 @@ const SIMILAR = 'node /opt/tools/agenttrail-audit.mjs hook'
 const settingsPath = repo => path.join(repo, '.claude', 'settings.local.json')
 const read = repo => JSON.parse(fs.readFileSync(settingsPath(repo), 'utf8'))
 const commands = (cfg, ev) => (cfg.hooks[ev] || []).flatMap(e => (e.hooks || []).map(h => h.command))
-const mapRelays = (cfg, ev) => commands(cfg, ev).filter(c => c.includes('bin/agenttrail.mjs'))
+const mapRelays = (cfg, ev) => commands(cfg, ev).filter(isMapRelayCommand)
 
 function addHooks(repo, command, events) {
   fs.mkdirSync(path.dirname(settingsPath(repo)), { recursive: true })

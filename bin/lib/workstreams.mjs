@@ -26,7 +26,7 @@ const counted = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`
 const sameWork = (c) => `${c.at}|${c.s}`
 
 export function parseRefs(text) {
-  return text.split('\n').filter(Boolean).map((line) => {
+  return text.split(/\r?\n/).filter(Boolean).map((line) => {
     const [sha, ref] = line.split('\0')
     return { sha, ref }
   })
@@ -35,8 +35,10 @@ export function parseRefs(text) {
 export function parseWorktrees(text) {
   const list = []
   let at = null
-  for (const line of text.split('\n')) {
-    if (line.startsWith('worktree ')) list.push(at = { path: line.slice(9), head: null, branch: null })
+  for (const line of text.split(/\r?\n/)) {
+    // git prints worktree paths with forward slashes on Windows; the daemon
+    // compares them with path.resolve()d cwds, so normalise them here.
+    if (line.startsWith('worktree ')) list.push(at = { path: path.resolve(line.slice(9)), head: null, branch: null })
     else if (!at) continue
     else if (line.startsWith('HEAD ')) at.head = line.slice(5)
     else if (line.startsWith('branch ')) at.branch = line.slice(7)
@@ -48,7 +50,7 @@ export function parseWorktrees(text) {
 export const LOG_FORMAT = '%x01%H%x00%P%x00%ct%x00%at%x00%s'
 export function parseLog(text, prefix = '') {
   const out = []
-  for (const block of text.split('\x01')) {
+  for (const block of text.replace(/\r\n/g, '\n').split('\x01')) {
     if (!block) continue
     const [head, ...names] = block.split('\n')
     const [sha, parents, ct, at, s] = head.split('\0')

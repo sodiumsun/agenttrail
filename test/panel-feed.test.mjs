@@ -103,7 +103,7 @@ describe('GET /panel', () => {
 })
 
 describe('a repo opened through a symlink', () => {
-  test('the feed gives the real folder, which is what Herdr reports', async () => {
+  test('the feed gives the real folder, which is what Herdr reports', { skip: process.platform === 'win32' ? 'symlinks need Developer Mode or admin rights on Windows' : false }, async () => {
     const world = tempWorld()
     try {
       const link = path.join(world.root, 'link')

@@ -64,7 +64,8 @@ describe('Map request boundary', () => {
     assert.notEqual(mine, theirs)
     assert.equal((await map.post('/setup', '{}', { 'x-agenttrail-token': theirs })).status, 403)
     const file = path.join(world.home, '.agenttrail', 'tokens', `${map.port}.token`)
-    assert.equal(fs.statSync(file).mode & 0o777, 0o600)
+    // Windows reports synthesized mode bits for every file, so 0o600 is not meaningful there.
+    if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600)
     assert.equal(fs.readFileSync(file, 'utf8'), mine)
   })
 
@@ -113,7 +114,7 @@ describe('Map request boundary', () => {
     await until(async () => (await map.model()).runs.some(r => r.id === 'relay'), 'the relayed run')
   })
 
-  test('the token file goes away with its daemon', async () => {
+  test('the token file goes away with its daemon', { skip: process.platform === 'win32' ? 'child.kill("SIGTERM") force-terminates on Windows, so exit handlers do not run' : false }, async () => {
     const file = path.join(world.home, '.agenttrail', 'tokens', `${other.port}.token`)
     assert.ok(fs.existsSync(file))
     await other.stop()
