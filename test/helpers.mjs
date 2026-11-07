@@ -13,19 +13,32 @@ export const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..',
 export function tempDir(name) {
   return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `agenttrail-${name}-`)))
 }
+// Windows keeps a handle for a moment after a daemon is force-killed, and
+// fs.rmSync's maxRetries does not cover the top-level EPERM, so retry here.
+const pause = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+export function removeDir(target) {
+  for (let i = 0; ; i++) {
+    try { return fs.rmSync(target, { recursive: true, force: true }) } catch (e) {
+      if (i >= 50 || !['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(e.code)) throw e
+      pause(100)
+    }
+  }
+}
 export function tempWorld(plan = '') {
   const root = tempDir('world')
   const home = path.join(root, 'home'), repo = path.join(root, 'repo')
   fs.mkdirSync(home); fs.mkdirSync(repo)
   if (plan) fs.writeFileSync(path.join(repo, 'PLAN.md'), plan)
-  return { root, home, repo, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) }
+  return { root, home, repo, cleanup: () => removeDir(root) }
 }
 export function cleanEnv(home, extra = {}) {
   return { PATH: process.env.PATH, HOME: home, USERPROFILE: home, ...extra }
 }
 
 const canBind = port => new Promise(resolve => {
-  const s = net.createServer()
+  // A daemon probing this port for siblings may connect in the moment this is
+  // listening; an error on that socket must not fail the test process.
+  const s = net.createServer(c => c.on('error', () => {}))
   s.once('error', () => resolve(false))
   s.listen(port, '127.0.0.1', () => s.close(() => resolve(true)))
 })
@@ -56,6 +69,9 @@ export async function startMap({ repo, home, base, port = base, env = {} }) {
     }
     child.stdout.on('data', read)
     child.stderr.on('data', read)
+    // Force-killed children can reset their pipes on Windows; that is not a start failure.
+    child.stdout.on('error', () => {})
+    child.stderr.on('error', () => {})
     child.once('exit', code => { clearTimeout(timer); reject(new Error(`daemon exited ${code}: ${output}`)) })
   })
   return {
@@ -78,7 +94,9 @@ export async function stopAll() { await Promise.all([...running].map(c => stopCh
 export function request(port, target, { method = 'GET', body, headers = {} } = {}) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body)
-    const req = http.request({ host: '127.0.0.1', port, path: target, method, headers }, res => {
+    // One socket per request: a pooled keep-alive socket to a daemon that has just
+    // been force-killed emits ECONNRESET with no listener on Windows.
+    const req = http.request({ host: '127.0.0.1', port, path: target, method, headers, agent: false }, res => {
       let text = ''
       res.on('data', c => text += c)
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: text }))

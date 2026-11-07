@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { after, describe, test } from 'node:test'
+import { after, afterEach, describe, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { areaId, areaTitle, chooseAreas, describeAreas, ownerOf } from '../bin/lib/areas.mjs'
 import { assignCommits, boardNodes, folderLine, keepOrder, parseLog, parseRefs, parseWorktrees, readHistory, streamId } from '../bin/lib/workstreams.mjs'
@@ -47,7 +47,15 @@ describe('reading git output', () => {
 
   test('worktrees: attached, detached and bare', () => {
     const text = 'worktree /r\nbare\n\nworktree /a b\nHEAD aaa\nbranch refs/heads/x\n\nworktree /c\nHEAD ccc\ndetached\n\n'
-    assert.deepEqual(parseWorktrees(text), [{ path: '/a b', head: 'aaa', branch: 'refs/heads/x' }, { path: '/c', head: 'ccc', branch: null }])
+    assert.deepEqual(parseWorktrees(text), [{ path: path.resolve('/a b'), head: 'aaa', branch: 'refs/heads/x' }, { path: path.resolve('/c'), head: 'ccc', branch: null }])
+  })
+
+  test('git for Windows line endings do not leak into refs, worktrees or commits', () => {
+    assert.deepEqual(parseRefs('aaa\0refs/heads/x\r\n'), [{ sha: 'aaa', ref: 'refs/heads/x' }])
+    assert.deepEqual(parseWorktrees('worktree /c\r\nHEAD ccc\r\nbranch refs/heads/x\r\n\r\n'), [{ path: path.resolve('/c'), head: 'ccc', branch: 'refs/heads/x' }])
+    const [c] = parseLog('\x01aaa\0\x00200\x00100\x00Fix: CRLF\r\n\r\nsrc/a.js\r\n')
+    assert.equal(c.s, 'Fix: CRLF')
+    assert.deepEqual(c.files, ['src/a.js'])
   })
 
   test('refs', () => assert.deepEqual(parseRefs('aaa\0refs/heads/x\n'), [{ sha: 'aaa', ref: 'refs/heads/x' }]))
@@ -567,7 +575,10 @@ describe('a real Map with no plan', () => {
   const hook = (map, id, cwd, file, name = 'PostToolUse') => map.post('/hook', { hook_event_name: name, session_id: id, cwd, tool_name: 'Edit', tool_input: { file_path: file } })
   const start = async (w, env = {}) => startMap({ repo: w.repo, home: w.home, base: await freePortBase(), env: { NODE_OPTIONS: `--import=${POLL_WATCH}`, AGENTTRAIL_GIT_POLL_MS: '150', ...env } })
   const card = (b, title) => b.plan.find(n => n.title === title)
-  after(async () => { await stopAll(); for (const w of worlds) w.cleanup() })
+  // Each test starts its own daemon, and on Windows a dozen of them all polling git
+  // at 150 ms starve each other; stop this test's daemon before the next one starts.
+  afterEach(async () => { await stopAll() })
+  after(async () => { for (const w of worlds) w.cleanup() })
 
   test('every branch and worktree shows, marked as inferred, with commits as written', async () => {
     const w = busy()
@@ -600,7 +611,7 @@ describe('a real Map with no plan', () => {
     assert.match(card(b, 'feat/search').foot, /^1 uncommitted · /)
   })
 
-  test('Map runs only read-only git commands, leaves the repo as it was, and adds nothing', async () => {
+  test('Map runs only read-only git commands, leaves the repo as it was, and adds nothing', { skip: process.platform === 'win32' ? 'the call log uses a POSIX shell shim on PATH' : false }, async () => {
     const w = busy()
     const shimDir = tempDir('shim')
     worlds.push({ cleanup: () => fs.rmSync(shimDir, { recursive: true, force: true }) })
@@ -821,7 +832,7 @@ describe('public repo safety', () => {
 })
 
 describe('saved state from an older build', () => {
-  test('a saved scan in an old shape is dropped, and Map still starts', async () => {
+  test('a saved scan in an old shape is dropped, and Map still starts', { skip: process.platform === 'win32' ? 'Windows force-terminates on SIGTERM, so the daemon never saves state' : false }, async () => {
     const world = tempWorld()
     const base = await freePortBase()
     const first = await startMap({ repo: world.repo, home: world.home, base })

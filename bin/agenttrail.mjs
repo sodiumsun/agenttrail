@@ -90,22 +90,39 @@ async function relayHook() {
   if (!raw) return
   raw = withTerminalId(raw)
   const ports = process.env.AGENTTRAIL_PORT ? [parseInt(process.env.AGENTTRAIL_PORT, 10)] : boardPorts
-  await Promise.allSettled(ports.map(p => fetch(`http://127.0.0.1:${p}/hook`, {
-    method: 'POST', body: raw, signal: AbortSignal.timeout(400),
-  }).catch(() => {})))
+  await Promise.allSettled(ports.map(p => relayRequest(p, '/hook', raw)))
   // SessionStart: ask daemons for a staleness nudge — stdout lands in the agent's context
   try {
     const ev = JSON.parse(raw)
     if (ev.hook_event_name === 'SessionStart' && ev.cwd) {
       for (const p of ports) {
-        try {
-          const r = await fetch(`http://127.0.0.1:${p}/nudge?cwd=${encodeURIComponent(ev.cwd)}`, { signal: AbortSignal.timeout(400) })
-          const t = (await r.text()).trim()
-          if (t) { console.log(t); break }
-        } catch {}
+        const t = (await relayRequest(p, `/nudge?cwd=${encodeURIComponent(ev.cwd)}`)).trim()
+        if (t) { console.log(t); break }
       }
     }
   } catch {}
+}
+
+// A one-shot request with its own socket: fetch keeps a keep-alive pool alive,
+// which makes the relay hang after the event and crash in process.exit() on Windows.
+function relayRequest(port, target, body) {
+  return new Promise(resolve => {
+    let done = false
+    const finish = text => { if (!done) { done = true; resolve(text) } }
+    const req = http.request({
+      host: '127.0.0.1', port, path: target, agent: false,
+      method: body === undefined ? 'GET' : 'POST',
+      headers: body === undefined ? {} : { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+    }, res => {
+      let text = ''
+      res.setEncoding('utf8')
+      res.on('data', c => text += c)
+      res.on('end', () => finish(text))
+    })
+    req.setTimeout(400, () => { req.destroy(); finish('') })
+    req.on('error', () => finish(''))
+    req.end(body)
+  })
 }
 
 // Herdr names the terminal an agent runs in. It is the only thing that can tell

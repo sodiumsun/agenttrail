@@ -42,18 +42,25 @@ describe('starting up', () => {
   test('a Map that moves off a busy port starts once', async () => {
     world = tempWorld('# p\n')
     const base = await freePortBase()
-    const blocker = net.createServer()
+    // The daemon probes its whole port range for sibling boards, so it will connect
+    // here; a fetch it abandons resets that socket, and an unhandled error on the
+    // accepted socket fails this test on Windows.
+    const blocker = net.createServer(s => s.on('error', () => {}))
     await new Promise(r => blocker.listen(base, '127.0.0.1', r))
     const child = spawn(process.execPath, [BIN, world.repo, '--no-open'], { env: cleanEnv(world.home, { AGENTTRAIL_PORT_BASE: String(base) }), stdio: ['ignore', 'pipe', 'pipe'] })
     let out = ''
     child.stdout.on('data', c => out += c)
+    // A force-killed child's pipe can report ECONNRESET on Windows; the test
+    // only cares about the banner, so an error on either pipe must not fail it.
+    child.stdout.on('error', () => {})
+    child.stderr.on('error', () => {})
     await until(() => out.includes('localhost:'), 'the banner')
     await new Promise(r => setTimeout(r, 300))
     await new Promise(r => { child.once('exit', r); child.kill() })
     blocker.close()
     assert.equal(out.match(/agenttrail ·/g).length, 1, out)
   })
-  test('the page sets up a repo without waiting on the terminal', { skip: spawnSync('python3', ['-V']).status !== 0 }, async () => {
+  test('the page sets up a repo without waiting on the terminal', { skip: process.platform === 'win32' ? "python3's pty module is POSIX-only" : spawnSync('python3', ['-V']).status !== 0 }, async () => {
     world = tempWorld()
     const base = await freePortBase()
     // A pty, as in a terminal or a Herdr tab: stdin is a TTY and nobody answers it.
@@ -75,7 +82,7 @@ describe('starting up', () => {
       spawnSync('pkill', ['-f', world.repo])
     }
   })
-  test('saved state and its folder are private to this user', async () => {
+  test('saved state and its folder are private to this user', { skip: process.platform === 'win32' ? 'Windows force-terminates on SIGTERM, so the daemon never saves state' : false }, async () => {
     const map = await boot('# p\n')
     await map.stop()
     const dir = path.join(world.home, '.agenttrail')
