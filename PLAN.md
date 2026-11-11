@@ -57,6 +57,10 @@ files: [public/**, assets/brand/**]
   by: codex
   from: agent
   tech: valid encoded favicon; one-row status rail; viewport-bound app shell
+- [x] Keep the repository sidebar narrow at medium widths {#map-sidebar-columns}
+  by: pydemia
+  from: agent
+  tech: inherit the sidebar/map column order in public/index.html between 721px and 960px; docs/RESPONSIVE-SIDEBAR.md
 - [x] Switch the whole app between dark and light {#map-theme}
   by: codex
   from: agent
